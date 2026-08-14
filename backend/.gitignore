@@ -1,0 +1,35 @@
+# compiled output
+/dist
+/node_modules
+
+# built web frontend — populated by root `npm run build:web`
+/public
+!/public/.gitkeep
+
+# logs
+/logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# OS
+.DS_Store
+
+# editors
+.idea
+.vscode
+.history
+
+# env
+.env
+.env.*
+!.env.example
+
+# Prisma
+prisma/*.db
+prisma/*.db-journal
+
+# tests
+/coverage

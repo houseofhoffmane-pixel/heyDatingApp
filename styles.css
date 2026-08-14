@@ -1,0 +1,451 @@
+/* Hey — Gen Z dating app. Playful pastel, cheeky tone, iOS minimal. */
+
+:root {
+  /* base */
+  --ink: #1F1B16;
+  --ink-2: #4A453E;
+  --ink-3: #8E867B;
+  --ink-4: #BFB8AC;
+  --line: rgba(31, 27, 22, 0.08);
+  --line-2: rgba(31, 27, 22, 0.14);
+
+  /* surfaces */
+  --bg: #FAF7F2;          /* page cream */
+  --bg-2: #F4EFE6;        /* slightly deeper */
+  --card: #FFFFFF;
+
+  /* pastel tones */
+  --peach: #FFE3D6;
+  --peach-deep: #F8C4A8;
+  --mint: #D8EDDB;
+  --mint-deep: #A8D6B0;
+  --sky: #DDE8F4;
+  --sky-deep: #B5CDE5;
+  --butter: #FFEFC4;
+  --butter-deep: #F4D784;
+  --lilac: #E8E1F4;
+  --lilac-deep: #C8B8E0;
+  --rose: #FBDDE3;
+  --rose-deep: #F0A9B5;
+
+  /* accent */
+  --coral: #FF5A5F;
+  --coral-deep: #E63E43;
+  --coral-soft: #FFE4E5;
+
+  /* type */
+  --display: "Bricolage Grotesque", ui-rounded, -apple-system, system-ui, sans-serif;
+  --body: "Plus Jakarta Sans", -apple-system, system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* radii */
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-lg: 22px;
+  --r-xl: 28px;
+  --r-pill: 999px;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+body {
+  font-family: var(--body);
+  background: #ECE6DA;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+
+/* Stage layout — iPhone center, screen picker rail on left */
+.stage {
+  position: fixed; inset: 0;
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  align-items: center;
+  background:
+    radial-gradient(ellipse at top left, rgba(255, 227, 214, 0.6), transparent 50%),
+    radial-gradient(ellipse at bottom right, rgba(232, 225, 244, 0.5), transparent 50%),
+    #ECE6DA;
+}
+
+.rail {
+  height: 100vh;
+  overflow-y: auto;
+  padding: 24px 18px 24px 24px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0,0,0,0.18) transparent;
+}
+.rail::-webkit-scrollbar { width: 8px; }
+.rail::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.18); border-radius: 4px; }
+
+.rail-brand {
+  display: flex; align-items: baseline; gap: 8px;
+  font-family: var(--display);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-size: 28px;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+.rail-brand .dot { width: 10px; height: 10px; border-radius: 999px; background: var(--coral); display: inline-block; transform: translateY(-3px); }
+.rail-tag {
+  font-family: var(--mono); font-size: 10px;
+  color: var(--ink-3); margin-bottom: 22px;
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+
+.rail-section {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 18px 0 8px 6px;
+}
+.rail-section:first-of-type { margin-top: 4px; }
+
+.rail-link {
+  display: block; width: 100%; text-align: left;
+  padding: 8px 12px;
+  border: 0; background: transparent;
+  font: inherit; color: var(--ink-2);
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13.5px;
+  line-height: 1.2;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  transition: background 120ms;
+}
+.rail-link:hover { background: rgba(0,0,0,0.04); color: var(--ink); }
+.rail-link.active { background: var(--ink); color: #fff; }
+.rail-link .n {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-4);
+  margin-right: 8px;
+  display: inline-block;
+  width: 18px;
+}
+.rail-link.active .n { color: rgba(255,255,255,0.55); }
+
+.device-wrap {
+  display: flex; align-items: center; justify-content: center;
+  height: 100vh;
+  position: relative;
+}
+
+/* ---- Screen container (fills inside iOS frame content slot) ---- */
+.screen {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+  font-family: var(--body);
+  color: var(--ink);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+
+.screen-scroll {
+  flex: 1; min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.screen-scroll::-webkit-scrollbar { display: none; }
+
+/* status-bar pad so content doesn't crash into time */
+.status-pad { height: 62px; flex: 0 0 62px; }
+
+/* primary button */
+.btn {
+  appearance: none;
+  border: 0;
+  font-family: var(--body);
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  background: var(--ink);
+  color: #fff;
+  padding: 16px 22px;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  transition: transform 120ms, background 120ms;
+}
+.btn:hover { background: #000; }
+.btn:active { transform: scale(0.98); }
+.btn.coral { background: var(--coral); }
+.btn.coral:hover { background: var(--coral-deep); }
+.btn.ghost { background: transparent; color: var(--ink); }
+.btn.ghost:hover { background: rgba(0,0,0,0.05); }
+.btn.soft { background: rgba(0,0,0,0.06); color: var(--ink); }
+.btn.full { width: 100%; }
+.btn.lg { padding: 18px 22px; font-size: 17px; }
+
+/* display headline */
+.h-display {
+  font-family: var(--display);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 0.95;
+  color: var(--ink);
+}
+
+.h-1 { font-size: 44px; }
+.h-2 { font-size: 34px; }
+.h-3 { font-size: 26px; }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+
+/* tag chip */
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.chip.solid { background: var(--ink); color: #fff; border-color: var(--ink); }
+.chip.peach { background: var(--peach); border-color: transparent; }
+.chip.mint  { background: var(--mint);  border-color: transparent; }
+.chip.sky   { background: var(--sky);   border-color: transparent; }
+.chip.butter{ background: var(--butter);border-color: transparent; }
+.chip.lilac { background: var(--lilac); border-color: transparent; }
+.chip.rose  { background: var(--rose);  border-color: transparent; }
+.chip.coral { background: var(--coral); color: #fff; border-color: transparent; }
+
+/* card */
+.card {
+  background: var(--card);
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line);
+  padding: 16px;
+}
+
+/* photo placeholder — pastel canvas with mono label and big initial */
+.photo {
+  position: relative;
+  overflow: hidden;
+  background: var(--peach);
+  border-radius: var(--r-lg);
+}
+.photo::after {
+  content: attr(data-label);
+  position: absolute;
+  bottom: 10px; left: 12px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: rgba(0,0,0,0.4);
+  text-transform: uppercase;
+}
+.photo .initial {
+  position: absolute;
+  font-family: var(--display);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  color: rgba(0,0,0,0.18);
+  line-height: 1;
+}
+
+/* Bottom tab bar */
+.tabbar {
+  position: relative;
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  padding: 8px 12px 28px;
+  background: rgba(255,255,255,0.92);
+  border-top: 1px solid var(--line);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+}
+.tabbar button {
+  appearance: none; border: 0; background: transparent;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 8px 4px; cursor: pointer;
+  font: inherit;
+  color: var(--ink-3);
+}
+.tabbar button.active { color: var(--ink); }
+.tabbar button .label { font-size: 10.5px; font-weight: 600; letter-spacing: -0.005em; }
+.tabbar .dot-badge {
+  position: absolute;
+  width: 7px; height: 7px; border-radius: 999px; background: var(--coral);
+  top: 6px; right: 36%;
+}
+
+/* Floating accent halo for hero moments */
+.halo {
+  position: absolute; pointer-events: none;
+  border-radius: 50%;
+  filter: blur(40px);
+  opacity: 0.7;
+}
+
+/* Input */
+.input {
+  width: 100%;
+  appearance: none;
+  border: 1.5px solid var(--line-2);
+  background: var(--card);
+  padding: 16px 18px;
+  border-radius: var(--r-md);
+  font: inherit;
+  font-size: 16px;
+  color: var(--ink);
+  outline: none;
+  transition: border-color 120ms;
+}
+.input:focus { border-color: var(--ink); }
+.input::placeholder { color: var(--ink-3); }
+
+/* Sheet header — back chevron + title */
+.sheet-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 18px 4px;
+}
+.sheet-head .back {
+  width: 38px; height: 38px; border-radius: 999px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.sheet-head .back:hover { background: var(--bg-2); }
+
+/* Progress dots for onboarding */
+.dots { display: flex; gap: 6px; }
+.dots i {
+  display: block; width: 22px; height: 4px; border-radius: 999px;
+  background: rgba(0,0,0,0.1);
+}
+.dots i.on { background: var(--ink); }
+
+/* Place pin styling */
+.place-pin {
+  background: var(--card);
+  border-radius: 999px;
+  padding: 6px 12px 6px 8px;
+  display: inline-flex; align-items: center; gap: 6px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+  font-weight: 600; font-size: 13px;
+  border: 1px solid var(--line);
+}
+.place-pin .ct {
+  background: var(--coral); color: #fff;
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  min-width: 18px; text-align: center;
+}
+
+/* Decorative dotted grid for map */
+.map-bg {
+  background-color: #EDE7DA;
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(0,0,0,0.08) 1px, transparent 0);
+  background-size: 14px 14px;
+}
+
+/* shimmer/blob — used for verification badge etc. */
+.blob {
+  position: relative;
+  border-radius: 50%;
+}
+
+/* checkbox-like radio for filters */
+.radio-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.radio-row:last-child { border-bottom: 0; }
+.radio-row .check {
+  width: 24px; height: 24px; border-radius: 999px;
+  border: 2px solid var(--line-2);
+  display: flex; align-items: center; justify-content: center;
+}
+.radio-row.on .check { border-color: var(--ink); background: var(--ink); }
+.radio-row.on .check::after {
+  content: ""; width: 8px; height: 8px; border-radius: 999px; background: #fff;
+}
+
+/* tile button (gender picker) */
+.tile {
+  appearance: none;
+  border: 1.5px solid var(--line-2);
+  background: var(--card);
+  border-radius: var(--r-md);
+  padding: 14px 16px;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--ink);
+  display: flex; align-items: center; justify-content: space-between;
+  cursor: pointer;
+  text-align: left;
+}
+.tile:hover { border-color: var(--ink-3); }
+.tile.on {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #fff;
+}
+
+/* chat bubble */
+.bubble {
+  max-width: 75%;
+  padding: 10px 14px;
+  border-radius: 20px;
+  font-size: 15px;
+  line-height: 1.35;
+}
+.bubble.mine { background: var(--coral); color: #fff; align-self: flex-end; border-bottom-right-radius: 6px; }
+.bubble.theirs { background: var(--card); color: var(--ink); border: 1px solid var(--line); align-self: flex-start; border-bottom-left-radius: 6px; }
+
+/* match-moment celebration */
+@keyframes float-up {
+  0% { transform: translateY(20px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+@keyframes pop-in {
+  0% { transform: scale(0.5); opacity: 0; }
+  60% { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); }
+}
+@keyframes drift {
+  0% { transform: translateY(0) rotate(0); }
+  50% { transform: translateY(-8px) rotate(3deg); }
+  100% { transform: translateY(0) rotate(0); }
+}
+.drift { animation: drift 4s ease-in-out infinite; }
+.float-up { animation: float-up 500ms cubic-bezier(.2,.7,.3,1) both; }
+.pop-in   { animation: pop-in   500ms cubic-bezier(.34,1.56,.64,1) both; }
+
+/* Confetti pieces */
+.confetti {
+  position: absolute;
+  width: 8px; height: 12px;
+  border-radius: 1px;
+  pointer-events: none;
+}

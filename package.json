@@ -1,0 +1,19 @@
+{
+  "name": "hey",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hey — dating app. Single deploy: builds web, copies into backend/public, runs Nest as one Node process serving API + WS + SPA.",
+  "scripts": {
+    "install:all": "npm --prefix backend install && npm --prefix web install",
+    "build:web": "npm --prefix web run build && rm -rf backend/public && mkdir -p backend/public && cp -r web/dist/* backend/public/",
+    "build:backend": "npm --prefix backend run build",
+    "build": "npm run install:all && npm run build:web && npm run build:backend",
+    "postinstall": "npm run install:all",
+    "prisma:migrate": "npm --prefix backend run prisma:migrate",
+    "db:seed": "npm --prefix backend run db:seed",
+    "start": "node backend/dist/main.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

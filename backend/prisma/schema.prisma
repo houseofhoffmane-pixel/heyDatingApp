@@ -1,0 +1,984 @@
+// Hey — Prisma schema.
+//
+// Covers every entity in BACKEND_SPEC.md §3, plus admin_users / admin_audit
+// (§9) and refresh_tokens for the JWT refresh-rotation flow (§4.1).
+//
+// PostGIS-backed geography columns (places.location, events.location) are
+// declared with `Unsupported("geography(Point, 4326)")` so the generated
+// client knows the column exists; reads/writes for those use raw SQL
+// (helpers live in src/common/geo/).
+//
+// All DB columns are snake_case; TS models stay camelCase via @map / @@map.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis]
+}
+
+// ─────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────
+
+enum UserStatus {
+  onboarding
+  pending_verification
+  active
+  paused
+  hidden
+  banned
+  deleted
+}
+
+enum Visibility {
+  everyone
+  liked_only
+  spot_only
+}
+
+enum Gender {
+  woman
+  man
+  non_binary
+  trans_woman
+  trans_man
+  genderfluid
+  other
+}
+
+enum RelationshipIntent {
+  longterm
+  longterm_open
+  short_open
+  short
+  figuring_out
+  friends
+}
+
+enum StarSign {
+  aries
+  taurus
+  gemini
+  cancer
+  leo
+  virgo
+  libra
+  scorpio
+  sagittarius
+  capricorn
+  aquarius
+  pisces
+}
+
+enum Drinks {
+  often
+  socially
+  rarely
+  never
+}
+
+enum Smokes {
+  regularly
+  socially
+  trying_to_quit
+  never
+}
+
+enum Exercise {
+  daily
+  few_week
+  sometimes
+  never
+}
+
+enum Weed420 {
+  yes
+  sometimes
+  never
+}
+
+enum Kids {
+  want
+  have_want_more
+  have_done
+  dont_want
+  open
+  not_sure
+}
+
+enum Politics {
+  left
+  moderate
+  right
+  not_political
+  rather_not_say
+}
+
+enum Religion {
+  agnostic
+  atheist
+  christian
+  jewish
+  muslim
+  hindu
+  buddhist
+  spiritual
+  other
+}
+
+enum Monogamy {
+  monogamous
+  monogamish
+  non_monogamous
+  figuring
+}
+
+enum PhotoStatus {
+  pending
+  approved
+  rejected
+}
+
+enum VerificationStatus {
+  pending
+  approved
+  rejected
+}
+
+enum LikeAnchorType {
+  photo
+  prompt
+}
+
+enum MatchStatus {
+  active
+  unmatched
+  expired
+}
+
+enum MessageKind {
+  text
+  place_share
+  location_share
+  system
+}
+
+enum MessageStatus {
+  sent
+  delivered
+  read
+  failed
+}
+
+enum RsvpStatus {
+  going
+  cancelled
+}
+
+enum ReportTargetType {
+  profile
+  spot
+  event
+}
+
+enum ReportReason {
+  fake
+  inappropriate
+  harassment
+  spam
+  underage
+  scam
+  closed
+  wrong_info
+  unsafe
+  duplicate
+  misleading
+  cancelled
+  other
+}
+
+enum ReportStatus {
+  pending
+  reviewed
+  actioned
+  dismissed
+}
+
+enum AdminRole {
+  admin
+  moderator
+}
+
+enum DevicePlatform {
+  ios
+  android
+  web
+}
+
+enum LinkedProvider {
+  instagram
+  spotify
+}
+
+enum PlaceRequestStatus {
+  pending
+  approved
+  dismissed
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3.1 users (account / auth)
+// ─────────────────────────────────────────────────────────────
+
+model User {
+  id              String      @id @default(uuid()) @db.Uuid
+  phoneE164       String      @unique @map("phone_e164")
+  countryCode     String      @map("country_code")
+  email           String?     @unique
+  passwordHash    String?     @map("password_hash")
+  // Nullable until the onboarding name+dob step. Server enforces presence
+  // (and age >= 18) before status can advance to `pending_verification`.
+  dob             DateTime?   @db.Date
+  status          UserStatus  @default(onboarding)
+  visibility      Visibility  @default(everyone)
+  autoResumeAt    DateTime?   @map("auto_resume_at") @db.Timestamptz(6)
+  lastActiveAt    DateTime    @default(now()) @map("last_active_at") @db.Timestamptz(6)
+  ageConfirmed    Boolean     @default(false) @map("age_confirmed")
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt       DateTime?   @map("deleted_at") @db.Timestamptz(6)
+
+  profile             Profile?
+  verifications       Verification[]
+  photos              Photo[]            @relation("PhotoOwner")
+  checkins            Checkin[]
+  rsvps               EventRsvp[]
+  savedSpots          SavedSpot[]
+  savedEvents         SavedEvent[]
+  likesGiven          Like[]             @relation("LikeFrom")
+  likesReceived       Like[]             @relation("LikeTo")
+  matchesA            Match[]            @relation("MatchA")
+  matchesB            Match[]            @relation("MatchB")
+  messages            Message[]          @relation("MessageSender")
+  blocksGiven         Block[]            @relation("Blocker")
+  blocksReceived      Block[]            @relation("Blocked")
+  reportsFiled        Report[]           @relation("Reporter")
+  emergencyContact    EmergencyContact?
+  notifications       Notification[]
+  deviceTokens        DeviceToken[]
+  linkedAccounts      LinkedAccount[]
+  settings            UserSettings?
+  filters             Filters?
+  refreshTokens       RefreshToken[]
+  placeRequests       PlaceRequest[]
+  otpAttempts         OtpAttempt[]
+
+  @@index([phoneE164])
+  @@index([status])
+  @@index([lastActiveAt])
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3.2 profiles (1:1 with users)
+// ─────────────────────────────────────────────────────────────
+
+model Profile {
+  id                  String              @id @default(uuid()) @db.Uuid
+  userId              String              @unique @map("user_id") @db.Uuid
+  // The 6 fields below are mandatory before status can advance to
+  // `pending_verification`. They're nullable in the DB so a Profile row
+  // can exist during partial onboarding; OnboardingService validates
+  // presence + ranges before flipping status.
+  name                String?
+  gender              Gender?
+  genderCustom        String?             @map("gender_custom")
+  // Stored as text[] — values: women / men / non_binary / everyone.
+  lookingFor          String[]            @map("looking_for")
+  relationshipIntent  RelationshipIntent? @map("relationship_intent")
+  heightCm            Int?                @map("height_cm")
+  bio                 String?             @db.VarChar(180)
+  job                 String?
+  school              String?
+  pronouns            String?
+  starSign            StarSign?           @map("star_sign")
+  drinks              Drinks?
+  smokes              Smokes?
+  exercise            Exercise?
+  weed420             Weed420?            @map("weed_420")
+  kids                Kids?
+  politics            Politics?
+  religion            Religion?
+  monogamy            Monogamy?
+  completionPct       Int                 @default(0) @map("completion_pct")
+  // Last-known location for distance ranking — geography(Point,4326).
+  // Updated when client posts a refresh; never returned raw to clients.
+  // Defined in raw SQL; Prisma can read JSON or use raw queries.
+  // See: src/common/geo/queries.ts
+  createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  interests   ProfileInterest[]
+  prompts     ProfilePrompt[]
+  photos      Photo[]
+
+  @@map("profiles")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3.3 interests + profile_interests
+// ─────────────────────────────────────────────────────────────
+
+model Interest {
+  id        String @id @default(uuid()) @db.Uuid
+  slug      String @unique
+  label     String
+  category  String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  profiles  ProfileInterest[]
+
+  @@map("interests")
+}
+
+model ProfileInterest {
+  profileId  String @map("profile_id") @db.Uuid
+  interestId String @map("interest_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  profile  Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  interest Interest @relation(fields: [interestId], references: [id], onDelete: Cascade)
+
+  @@id([profileId, interestId])
+  @@map("profile_interests")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3.4 prompts + profile_prompts
+// ─────────────────────────────────────────────────────────────
+
+model Prompt {
+  id        String  @id @default(uuid()) @db.Uuid
+  text      String
+  active    Boolean @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  answers   ProfilePrompt[]
+
+  @@map("prompts")
+}
+
+model ProfilePrompt {
+  id        String  @id @default(uuid()) @db.Uuid
+  profileId String  @map("profile_id") @db.Uuid
+  promptId  String  @map("prompt_id") @db.Uuid
+  answer    String  @db.VarChar(280)
+  position  Int     @default(0)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  profile     Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  prompt      Prompt  @relation(fields: [promptId], references: [id], onDelete: Restrict)
+  likeAnchors Like[]  @relation("LikePromptAnchor")
+
+  @@unique([profileId, position])
+  @@index([profileId])
+  @@map("profile_prompts")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3.5 photos
+// ─────────────────────────────────────────────────────────────
+
+model Photo {
+  id          String      @id @default(uuid()) @db.Uuid
+  profileId   String      @map("profile_id") @db.Uuid
+  userId      String      @map("user_id") @db.Uuid
+  s3Key       String      @map("s3_key")
+  position    Int
+  isMain      Boolean     @default(false) @map("is_main")
+  nsfwScore   Float?      @map("nsfw_score")
+  status      PhotoStatus @default(pending)
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  profile     Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  user        User    @relation("PhotoOwner", fields: [userId], references: [id], onDelete: Cascade)
+  likeAnchors Like[]  @relation("LikePhotoAnchor")
+
+  @@unique([profileId, position])
+  @@index([profileId])
+  @@map("photos")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3.6 verifications
+// ─────────────────────────────────────────────────────────────
+
+model Verification {
+  id              String              @id @default(uuid()) @db.Uuid
+  userId          String              @map("user_id") @db.Uuid
+  selfieS3Key     String              @map("selfie_s3_key")
+  status          VerificationStatus  @default(pending)
+  matchConfidence Float?              @map("match_confidence")
+  rejectReason    String?             @map("reject_reason")
+  attempt         Int                 @default(1)
+  reviewedBy      String?             @map("reviewed_by") @db.Uuid
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@map("verifications")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3.10 cities  (must come before places/events; ordering for readability)
+// ─────────────────────────────────────────────────────────────
+
+model City {
+  id        String   @id @default(uuid()) @db.Uuid
+  slug      String   @unique
+  name      String
+  country   String
+  // center geography(Point,4326) — defined in raw SQL
+  radiusKm  Int      @default(50) @map("radius_km")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  places Place[]
+  events Event[]
+
+  @@map("cities")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3.7 places (Spots — admin-curated)
+// ─────────────────────────────────────────────────────────────
+
+model Place {
+  id        String   @id @default(uuid()) @db.Uuid
+  label     String
+  kind      String
+  vibe      String
+  address   String
+  // location geography(Point,4326) — raw SQL
+  icon      String
+  tone      String
+  hot       Boolean  @default(false)
+  active    Boolean  @default(true)
+  cityId    String   @map("city_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  city     City        @relation(fields: [cityId], references: [id], onDelete: Restrict)
+  events   Event[]
+  checkins Checkin[]
+  saves    SavedSpot[]
+
+  @@index([cityId])
+  @@map("places")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3.8 events
+// ─────────────────────────────────────────────────────────────
+
+model Event {
+  id        String   @id @default(uuid()) @db.Uuid
+  title     String
+  host      String
+  vibe      String
+  placeId   String?  @map("place_id") @db.Uuid
+  // location geography(Point,4326) — raw SQL
+  startsAt  DateTime @map("starts_at") @db.Timestamptz(6)
+  endsAt    DateTime @map("ends_at") @db.Timestamptz(6)
+  doorText  String   @map("door_text")
+  coverText String   @map("cover_text")
+  cityId    String   @map("city_id") @db.Uuid
+  tags      String[]
+  icon      String
+  tone      String
+  hot       Boolean  @default(false)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  place    Place?       @relation(fields: [placeId], references: [id], onDelete: SetNull)
+  city     City         @relation(fields: [cityId], references: [id], onDelete: Restrict)
+  rsvps    EventRsvp[]
+  checkins Checkin[]
+  saves    SavedEvent[]
+
+  @@index([cityId, startsAt])
+  @@index([startsAt])
+  @@map("events")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3.9 checkins (the geo-trust core)
+// ─────────────────────────────────────────────────────────────
+
+model Checkin {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  placeId      String?   @map("place_id") @db.Uuid
+  eventId      String?   @map("event_id") @db.Uuid
+  checkedInAt  DateTime  @default(now()) @map("checked_in_at") @db.Timestamptz(6)
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(6)
+  deviceLat    Float     @map("device_lat")
+  deviceLng    Float     @map("device_lng")
+  leftAt       DateTime? @map("left_at") @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  place Place? @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  event Event? @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([userId, leftAt])
+  @@index([placeId, leftAt, expiresAt])
+  @@index([eventId, leftAt, expiresAt])
+  @@map("checkins")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3.11 event_rsvps
+// ─────────────────────────────────────────────────────────────
+
+model EventRsvp {
+  id        String     @id @default(uuid()) @db.Uuid
+  userId    String     @map("user_id") @db.Uuid
+  eventId   String     @map("event_id") @db.Uuid
+  status    RsvpStatus @default(going)
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventId])
+  @@index([eventId, status])
+  @@map("event_rsvps")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3.12 saved_spots + saved_events
+// ─────────────────────────────────────────────────────────────
+
+model SavedSpot {
+  userId    String   @map("user_id") @db.Uuid
+  placeId   String   @map("place_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  place Place @relation(fields: [placeId], references: [id], onDelete: Cascade)
+
+  @@id([userId, placeId])
+  @@map("saved_spots")
+}
+
+model SavedEvent {
+  userId    String   @map("user_id") @db.Uuid
+  eventId   String   @map("event_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@id([userId, eventId])
+  @@map("saved_events")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3.13 likes
+// ─────────────────────────────────────────────────────────────
+
+model Like {
+  id              String         @id @default(uuid()) @db.Uuid
+  fromUserId      String         @map("from_user_id") @db.Uuid
+  toUserId        String         @map("to_user_id") @db.Uuid
+  anchorType      LikeAnchorType @map("anchor_type")
+  anchorPhotoId   String?        @map("anchor_photo_id") @db.Uuid
+  anchorPromptId  String?        @map("anchor_prompt_id") @db.Uuid
+  comment         String?        @db.VarChar(140)
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  fromUser     User           @relation("LikeFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser       User           @relation("LikeTo",   fields: [toUserId],   references: [id], onDelete: Cascade)
+  anchorPhoto  Photo?         @relation("LikePhotoAnchor",  fields: [anchorPhotoId],  references: [id], onDelete: SetNull)
+  anchorPrompt ProfilePrompt? @relation("LikePromptAnchor", fields: [anchorPromptId], references: [id], onDelete: SetNull)
+  matchA       Match?         @relation("MatchLikeA")
+  matchB       Match?         @relation("MatchLikeB")
+
+  @@unique([fromUserId, toUserId])
+  @@index([toUserId, createdAt])
+  @@map("likes")
+}
+
+// ─────────────────────────────────────────────────────────────
+//   passes — separate table because §4.4 distinguishes them
+//   from likes. Same uniqueness rule.
+// ─────────────────────────────────────────────────────────────
+
+model Pass {
+  id         String   @id @default(uuid()) @db.Uuid
+  fromUserId String   @map("from_user_id") @db.Uuid
+  toUserId   String   @map("to_user_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([fromUserId, toUserId])
+  @@map("passes")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3.14 matches
+// ─────────────────────────────────────────────────────────────
+
+model Match {
+  id            String      @id @default(uuid()) @db.Uuid
+  userAId       String      @map("user_a_id") @db.Uuid
+  userBId       String      @map("user_b_id") @db.Uuid
+  likeAId       String      @unique @map("like_a_id") @db.Uuid
+  likeBId       String      @unique @map("like_b_id") @db.Uuid
+  status        MatchStatus @default(active)
+  lastMessageAt DateTime?   @map("last_message_at") @db.Timestamptz(6)
+  unmatchedBy   String?     @map("unmatched_by") @db.Uuid
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  userA    User      @relation("MatchA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB    User      @relation("MatchB", fields: [userBId], references: [id], onDelete: Cascade)
+  likeA    Like      @relation("MatchLikeA", fields: [likeAId], references: [id], onDelete: Cascade)
+  likeB    Like      @relation("MatchLikeB", fields: [likeBId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  // Sorted-pair uniqueness — userAId < userBId enforced via CHECK in migration SQL.
+  @@unique([userAId, userBId])
+  @@index([userAId, status, lastMessageAt])
+  @@index([userBId, status, lastMessageAt])
+  @@map("matches")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3.15 messages
+// ─────────────────────────────────────────────────────────────
+
+model Message {
+  id        String        @id @default(uuid()) @db.Uuid
+  matchId   String        @map("match_id") @db.Uuid
+  senderId  String        @map("sender_id") @db.Uuid
+  body      String
+  kind      MessageKind   @default(text)
+  status    MessageStatus @default(sent)
+  clientId  String        @map("client_id")
+  readAt    DateTime?     @map("read_at") @db.Timestamptz(6)
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  match  Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  sender User  @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  // Idempotency: a sender can never persist the same clientId twice within a match.
+  @@unique([matchId, senderId, clientId])
+  @@index([matchId, createdAt])
+  @@map("messages")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3.16 blocks + reports
+// ─────────────────────────────────────────────────────────────
+
+model Block {
+  blockerId String   @map("blocker_id") @db.Uuid
+  blockedId String   @map("blocked_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  blocker User @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@id([blockerId, blockedId])
+  @@index([blockedId])
+  @@map("blocks")
+}
+
+model Report {
+  id          String           @id @default(uuid()) @db.Uuid
+  reporterId  String           @map("reporter_id") @db.Uuid
+  targetType  ReportTargetType @map("target_type")
+  targetId    String           @map("target_id") @db.Uuid
+  reason      ReportReason
+  detail      String           @db.VarChar(280)
+  status      ReportStatus     @default(pending)
+  reviewedBy  String?          @map("reviewed_by") @db.Uuid
+  reviewNote  String?          @map("review_note")
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  reporter      User    @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  // target_id is polymorphic (profile / spot / event) — no DB FK; resolved
+  // in the app layer based on target_type.
+
+  @@index([status, createdAt])
+  @@index([reporterId])
+  @@index([targetType, targetId])
+  @@map("reports")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3.17 emergency_contacts
+// ─────────────────────────────────────────────────────────────
+
+model EmergencyContact {
+  id                 String   @id @default(uuid()) @db.Uuid
+  userId             String   @unique @map("user_id") @db.Uuid
+  name               String
+  phoneE164          String   @map("phone_e164")
+  autoShareFirstDate Boolean  @default(false) @map("auto_share_first_date")
+  checkinTimer       Boolean  @default(false) @map("checkin_timer")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("emergency_contacts")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3.18 notifications + device_tokens
+// ─────────────────────────────────────────────────────────────
+
+model Notification {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  type      String
+  payload   Json
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read, createdAt])
+  @@map("notifications")
+}
+
+model DeviceToken {
+  id        String         @id @default(uuid()) @db.Uuid
+  userId    String         @map("user_id") @db.Uuid
+  fcmToken  String         @map("fcm_token")
+  platform  DevicePlatform
+  lastSeen  DateTime       @default(now()) @map("last_seen") @db.Timestamptz(6)
+  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, fcmToken])
+  @@map("device_tokens")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3.19 linked_accounts
+// ─────────────────────────────────────────────────────────────
+
+model LinkedAccount {
+  id          String         @id @default(uuid()) @db.Uuid
+  userId      String         @map("user_id") @db.Uuid
+  provider    LinkedProvider
+  handle      String
+  data        Json?
+  connectedAt DateTime       @default(now()) @map("connected_at") @db.Timestamptz(6)
+  updatedAt   DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@map("linked_accounts")
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3.20 user_settings (notification + privacy toggles)
+// ─────────────────────────────────────────────────────────────
+
+model UserSettings {
+  userId            String   @id @map("user_id") @db.Uuid
+
+  notifyMatches     Boolean  @default(true)  @map("notify_matches")
+  notifyMessages    Boolean  @default(true)  @map("notify_messages")
+  notifyLikes       Boolean  @default(true)  @map("notify_likes")
+  notifyPlaces      Boolean  @default(true)  @map("notify_places")
+  notifyEvents      Boolean  @default(true)  @map("notify_events")
+  notifyNews        Boolean  @default(false) @map("notify_news")
+  emailDigest       Boolean  @default(false) @map("email_digest")
+  quietHoursStart   Int?     @map("quiet_hours_start")  // 0-23, local hour
+  quietHoursEnd     Int?     @map("quiet_hours_end")
+
+  readReceipts      Boolean  @default(true) @map("read_receipts")
+  activeStatus      Boolean  @default(true) @map("active_status")
+  blurExplicit      Boolean  @default(true) @map("blur_explicit")
+  showMeOnPlaces    Boolean  @default(true) @map("show_me_on_places")
+
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Discovery filters (implicit, from §4.3 PUT /filters)
+// ─────────────────────────────────────────────────────────────
+
+model Filters {
+  userId          String   @id @map("user_id") @db.Uuid
+
+  // Multi-select arrays
+  lookingFor      String[] @map("looking_for")
+  relationship    String[]
+  drinks          String[]
+  smokes          String[]
+  exercise        String[]
+  weed420         String[] @map("weed_420")
+  kids            String[]
+  politics        String[]
+  religion        String[]
+  monogamy        String[]
+  starSign        String[] @map("star_sign")
+  interests       String[]
+
+  ageMin          Int      @default(18) @map("age_min")
+  ageMax          Int      @default(99) @map("age_max")
+  heightMinCm     Int      @default(120) @map("height_min_cm")
+  heightMaxCm     Int      @default(220) @map("height_max_cm")
+  distanceMi      Int      @default(25) @map("distance_mi")
+  showMeOnPlaces  Boolean  @default(true) @map("show_me_on_places")
+
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("filters")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Auth — refresh tokens (rotated, hashed)
+// ─────────────────────────────────────────────────────────────
+
+model RefreshToken {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  tokenHash  String   @unique @map("token_hash")
+  family     String                              // rotation family id
+  parentId   String?  @map("parent_id") @db.Uuid // previous token in chain
+  userAgent  String?  @map("user_agent")
+  ip         String?
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(6)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([family])
+  @@map("refresh_tokens")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Auth — OTP attempt log (rate-limiting + lockout)
+// ─────────────────────────────────────────────────────────────
+
+model OtpAttempt {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  phoneE164 String   @map("phone_e164")
+  success   Boolean  @default(false)
+  ip        String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([phoneE164, createdAt])
+  @@map("otp_attempts")
+}
+
+// ─────────────────────────────────────────────────────────────
+// User-suggested places ("can't see your favorite? send us a note.")
+// ─────────────────────────────────────────────────────────────
+
+model PlaceRequest {
+  id          String              @id @default(uuid()) @db.Uuid
+  userId      String              @map("user_id") @db.Uuid
+  label       String
+  address     String?
+  detail      String
+  status      PlaceRequestStatus  @default(pending)
+  reviewedBy  String?             @map("reviewed_by") @db.Uuid
+  createdAt   DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@map("place_requests")
+}
+
+// ─────────────────────────────────────────────────────────────
+// §9 Admin — admin_users + admin_audit
+// ─────────────────────────────────────────────────────────────
+
+model AdminUser {
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  role         AdminRole @default(moderator)
+  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  audits AdminAudit[]
+
+  @@map("admin_users")
+}
+
+model AdminAudit {
+  id        String   @id @default(uuid()) @db.Uuid
+  adminId   String   @map("admin_id") @db.Uuid
+  action    String
+  target    String
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  admin AdminUser @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId, createdAt])
+  @@index([target])
+  @@map("admin_audit")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Feed-weight config (singleton row; tunable from /admin/config)
+// ─────────────────────────────────────────────────────────────
+
+model FeedConfig {
+  id                       Int      @id @default(1)
+  wRecency                 Float    @default(0.25) @map("w_recency")
+  wMutualInterests         Float    @default(0.20) @map("w_mutual_interests")
+  wSameSpot                Float    @default(0.20) @map("w_same_spot")
+  wDistance                Float    @default(0.15) @map("w_distance")
+  wReciprocal              Float    @default(0.15) @map("w_reciprocal")
+  wRecentlyShownPenalty    Float    @default(0.05) @map("w_recently_shown_penalty")
+  updatedAt                DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("feed_config")
+}
