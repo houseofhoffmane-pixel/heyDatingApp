@@ -37,14 +37,19 @@ import { HealthController } from './health.controller';
     // Serve the built web frontend from backend/public. In production the
     // root build script (npm run build:web) copies web/dist here, so one
     // Node process serves the SPA + the API (/api/v1/*) + the WS (/rt).
-    // The exclude keeps API + WS routes from being swallowed by the SPA
-    // fallback that returns index.html for any unknown path (React Router
-    // deep-links like /discover, /chats/abc).
+    //
+    // Path is anchored to the compiled file location (__dirname) rather
+    // than process.cwd() so it works whether Hostinger launches Node from
+    // the repo root (`node backend/dist/main.js`) or from `backend/`.
+    // From backend/dist/app.module.js → ../public = backend/public. ✓
+    //
+    // `exclude` keeps API + WS routes out of the SPA fallback that
+    // returns index.html for any unknown path (React Router deep-links
+    // like /discover, /chats/abc).
     ServeStaticModule.forRoot({
-      rootPath: join(process.cwd(), 'public'),
+      rootPath: join(__dirname, '..', 'public'),
       exclude: ['/api*', '/rt*'],
       serveStaticOptions: {
-        // SPA behavior — unknown paths land on index.html so React Router owns routing.
         fallthrough: true,
         index: 'index.html',
       },
