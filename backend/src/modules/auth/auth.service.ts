@@ -117,11 +117,9 @@ export class AuthService {
       data: { lastActiveAt: new Date() },
     });
 
-    const isVerified = await this.isVerified(user.id);
-
     return {
       ...issued,
-      user: toUserPublic(user, isVerified),
+      user: toUserPublic(user),
       isNewUser,
     };
   }
@@ -147,8 +145,7 @@ export class AuthService {
       where: { id: user.id },
       data: { lastActiveAt: new Date() },
     });
-    const isVerified = await this.isVerified(user.id);
-    return { ...issued, user: toUserPublic(user, isVerified) };
+    return { ...issued, user: toUserPublic(user) };
   }
 
   // ── Refresh + logout ─────────────────────────────────────────
@@ -201,14 +198,6 @@ export class AuthService {
       },
     });
     return { user: created, isNewUser: true };
-  }
-
-  private async isVerified(userId: string): Promise<boolean> {
-    const v = await this.prisma.verification.findFirst({
-      where: { userId, status: 'approved' },
-      orderBy: { createdAt: 'desc' },
-    });
-    return !!v;
   }
 }
 

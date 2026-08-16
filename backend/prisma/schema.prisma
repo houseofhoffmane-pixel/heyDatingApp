@@ -1,14 +1,14 @@
-// Hey — Prisma schema.
+// Hey — Prisma schema (ship-scope, no spots/events/verification/admin).
 //
-// Covers every entity in BACKEND_SPEC.md §3, plus admin_users / admin_audit
-// (§9) and refresh_tokens for the JWT refresh-rotation flow (§4.1).
-//
-// PostGIS-backed geography columns (places.location, events.location) are
-// declared with `Unsupported("geography(Point, 4326)")` so the generated
-// client knows the column exists; reads/writes for those use raw SQL
-// (helpers live in src/common/geo/).
+// PostGIS geography column on profiles.location powers the distance
+// filter in DiscoveryService. Declared with `Unsupported(...)` so the
+// generated client knows the column exists; reads/writes go through
+// raw SQL helpers in src/common/geo/.
 //
 // All DB columns are snake_case; TS models stay camelCase via @map / @@map.
+//
+// Sprint 3 swaps this to a MySQL provider — schema shape stays largely
+// the same, `TEXT[]` → `Json`, PostGIS geography → MySQL `POINT SRID 4326`.
 
 generator client {
   provider        = "prisma-client-js"
@@ -27,7 +27,6 @@ datasource db {
 
 enum UserStatus {
   onboarding
-  pending_verification
   active
   paused
   hidden
@@ -38,7 +37,6 @@ enum UserStatus {
 enum Visibility {
   everyone
   liked_only
-  spot_only
 }
 
 enum Gender {
@@ -144,12 +142,6 @@ enum PhotoStatus {
   rejected
 }
 
-enum VerificationStatus {
-  pending
-  approved
-  rejected
-}
-
 enum LikeAnchorType {
   photo
   prompt
@@ -163,7 +155,7 @@ enum MatchStatus {
 
 enum MessageKind {
   text
-  place_share
+  place_share      // vestigial — retained so existing rows don't fail to load; frontend never sends this
   location_share
   system
 }
@@ -175,15 +167,9 @@ enum MessageStatus {
   failed
 }
 
-enum RsvpStatus {
-  going
-  cancelled
-}
-
+// Only `profile` targets remain (no spots/events to report).
 enum ReportTargetType {
   profile
-  spot
-  event
 }
 
 enum ReportReason {
@@ -193,12 +179,6 @@ enum ReportReason {
   spam
   underage
   scam
-  closed
-  wrong_info
-  unsafe
-  duplicate
-  misleading
-  cancelled
   other
 }
 
@@ -207,11 +187,6 @@ enum ReportStatus {
   reviewed
   actioned
   dismissed
-}
-
-enum AdminRole {
-  admin
-  moderator
 }
 
 enum DevicePlatform {
@@ -225,14 +200,8 @@ enum LinkedProvider {
   spotify
 }
 
-enum PlaceRequestStatus {
-  pending
-  approved
-  dismissed
-}
-
 // ─────────────────────────────────────────────────────────────
-// 3.1 users (account / auth)
+// users
 // ─────────────────────────────────────────────────────────────
 
 model User {
@@ -241,8 +210,6 @@ model User {
   countryCode     String      @map("country_code")
   email           String?     @unique
   passwordHash    String?     @map("password_hash")
-  // Nullable until the onboarding name+dob step. Server enforces presence
-  // (and age >= 18) before status can advance to `pending_verification`.
   dob             DateTime?   @db.Date
   status          UserStatus  @default(onboarding)
   visibility      Visibility  @default(everyone)
@@ -254,12 +221,7 @@ model User {
   deletedAt       DateTime?   @map("deleted_at") @db.Timestamptz(6)
 
   profile             Profile?
-  verifications       Verification[]
   photos              Photo[]            @relation("PhotoOwner")
-  checkins            Checkin[]
-  rsvps               EventRsvp[]
-  savedSpots          SavedSpot[]
-  savedEvents         SavedEvent[]
   likesGiven          Like[]             @relation("LikeFrom")
   likesReceived       Like[]             @relation("LikeTo")
   matchesA            Match[]            @relation("MatchA")
@@ -275,7 +237,6 @@ model User {
   settings            UserSettings?
   filters             Filters?
   refreshTokens       RefreshToken[]
-  placeRequests       PlaceRequest[]
   otpAttempts         OtpAttempt[]
 
   @@index([phoneE164])
@@ -285,20 +246,19 @@ model User {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 3.2 profiles (1:1 with users)
+// profiles
 // ─────────────────────────────────────────────────────────────
 
 model Profile {
   id                  String              @id @default(uuid()) @db.Uuid
   userId              String              @unique @map("user_id") @db.Uuid
-  // The 6 fields below are mandatory before status can advance to
-  // `pending_verification`. They're nullable in the DB so a Profile row
-  // can exist during partial onboarding; OnboardingService validates
-  // presence + ranges before flipping status.
+  // The 6 fields below are mandatory before status can advance to `active`.
+  // Nullable in the DB so a Profile row can exist during partial onboarding;
+  // OnboardingService validates presence + ranges before flipping status.
   name                String?
   gender              Gender?
   genderCustom        String?             @map("gender_custom")
-  // Stored as text[] — values: women / men / non_binary / everyone.
+  // text[] — values: women / men / non-binary / everyone
   lookingFor          String[]            @map("looking_for")
   relationshipIntent  RelationshipIntent? @map("relationship_intent")
   heightCm            Int?                @map("height_cm")
@@ -316,10 +276,8 @@ model Profile {
   religion            Religion?
   monogamy            Monogamy?
   completionPct       Int                 @default(0) @map("completion_pct")
-  // Last-known location for distance ranking — geography(Point,4326).
-  // Updated when client posts a refresh; never returned raw to clients.
-  // Defined in raw SQL; Prisma can read JSON or use raw queries.
-  // See: src/common/geo/queries.ts
+  // Last-known location for distance ranking. Never returned raw.
+  // Defined in raw SQL; Prisma reads/writes via src/common/geo/.
   createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -332,7 +290,7 @@ model Profile {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 3.3 interests + profile_interests
+// interests + profile_interests
 // ─────────────────────────────────────────────────────────────
 
 model Interest {
@@ -361,7 +319,7 @@ model ProfileInterest {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 3.4 prompts + profile_prompts
+// prompts + profile_prompts
 // ─────────────────────────────────────────────────────────────
 
 model Prompt {
@@ -395,7 +353,7 @@ model ProfilePrompt {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 3.5 photos
+// photos
 // ─────────────────────────────────────────────────────────────
 
 model Photo {
@@ -420,187 +378,7 @@ model Photo {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 3.6 verifications
-// ─────────────────────────────────────────────────────────────
-
-model Verification {
-  id              String              @id @default(uuid()) @db.Uuid
-  userId          String              @map("user_id") @db.Uuid
-  selfieS3Key     String              @map("selfie_s3_key")
-  status          VerificationStatus  @default(pending)
-  matchConfidence Float?              @map("match_confidence")
-  rejectReason    String?             @map("reject_reason")
-  attempt         Int                 @default(1)
-  reviewedBy      String?             @map("reviewed_by") @db.Uuid
-  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, status])
-  @@map("verifications")
-}
-
-// ─────────────────────────────────────────────────────────────
-// 3.10 cities  (must come before places/events; ordering for readability)
-// ─────────────────────────────────────────────────────────────
-
-model City {
-  id        String   @id @default(uuid()) @db.Uuid
-  slug      String   @unique
-  name      String
-  country   String
-  // center geography(Point,4326) — defined in raw SQL
-  radiusKm  Int      @default(50) @map("radius_km")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  places Place[]
-  events Event[]
-
-  @@map("cities")
-}
-
-// ─────────────────────────────────────────────────────────────
-// 3.7 places (Spots — admin-curated)
-// ─────────────────────────────────────────────────────────────
-
-model Place {
-  id        String   @id @default(uuid()) @db.Uuid
-  label     String
-  kind      String
-  vibe      String
-  address   String
-  // location geography(Point,4326) — raw SQL
-  icon      String
-  tone      String
-  hot       Boolean  @default(false)
-  active    Boolean  @default(true)
-  cityId    String   @map("city_id") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  city     City        @relation(fields: [cityId], references: [id], onDelete: Restrict)
-  events   Event[]
-  checkins Checkin[]
-  saves    SavedSpot[]
-
-  @@index([cityId])
-  @@map("places")
-}
-
-// ─────────────────────────────────────────────────────────────
-// 3.8 events
-// ─────────────────────────────────────────────────────────────
-
-model Event {
-  id        String   @id @default(uuid()) @db.Uuid
-  title     String
-  host      String
-  vibe      String
-  placeId   String?  @map("place_id") @db.Uuid
-  // location geography(Point,4326) — raw SQL
-  startsAt  DateTime @map("starts_at") @db.Timestamptz(6)
-  endsAt    DateTime @map("ends_at") @db.Timestamptz(6)
-  doorText  String   @map("door_text")
-  coverText String   @map("cover_text")
-  cityId    String   @map("city_id") @db.Uuid
-  tags      String[]
-  icon      String
-  tone      String
-  hot       Boolean  @default(false)
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  place    Place?       @relation(fields: [placeId], references: [id], onDelete: SetNull)
-  city     City         @relation(fields: [cityId], references: [id], onDelete: Restrict)
-  rsvps    EventRsvp[]
-  checkins Checkin[]
-  saves    SavedEvent[]
-
-  @@index([cityId, startsAt])
-  @@index([startsAt])
-  @@map("events")
-}
-
-// ─────────────────────────────────────────────────────────────
-// 3.9 checkins (the geo-trust core)
-// ─────────────────────────────────────────────────────────────
-
-model Checkin {
-  id           String    @id @default(uuid()) @db.Uuid
-  userId       String    @map("user_id") @db.Uuid
-  placeId      String?   @map("place_id") @db.Uuid
-  eventId      String?   @map("event_id") @db.Uuid
-  checkedInAt  DateTime  @default(now()) @map("checked_in_at") @db.Timestamptz(6)
-  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(6)
-  deviceLat    Float     @map("device_lat")
-  deviceLng    Float     @map("device_lng")
-  leftAt       DateTime? @map("left_at") @db.Timestamptz(6)
-  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  place Place? @relation(fields: [placeId], references: [id], onDelete: Cascade)
-  event Event? @relation(fields: [eventId], references: [id], onDelete: Cascade)
-
-  @@index([userId, leftAt])
-  @@index([placeId, leftAt, expiresAt])
-  @@index([eventId, leftAt, expiresAt])
-  @@map("checkins")
-}
-
-// ─────────────────────────────────────────────────────────────
-// 3.11 event_rsvps
-// ─────────────────────────────────────────────────────────────
-
-model EventRsvp {
-  id        String     @id @default(uuid()) @db.Uuid
-  userId    String     @map("user_id") @db.Uuid
-  eventId   String     @map("event_id") @db.Uuid
-  status    RsvpStatus @default(going)
-  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, eventId])
-  @@index([eventId, status])
-  @@map("event_rsvps")
-}
-
-// ─────────────────────────────────────────────────────────────
-// 3.12 saved_spots + saved_events
-// ─────────────────────────────────────────────────────────────
-
-model SavedSpot {
-  userId    String   @map("user_id") @db.Uuid
-  placeId   String   @map("place_id") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  place Place @relation(fields: [placeId], references: [id], onDelete: Cascade)
-
-  @@id([userId, placeId])
-  @@map("saved_spots")
-}
-
-model SavedEvent {
-  userId    String   @map("user_id") @db.Uuid
-  eventId   String   @map("event_id") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
-
-  @@id([userId, eventId])
-  @@map("saved_events")
-}
-
-// ─────────────────────────────────────────────────────────────
-// 3.13 likes
+// likes
 // ─────────────────────────────────────────────────────────────
 
 model Like {
@@ -625,11 +403,7 @@ model Like {
   @@map("likes")
 }
 
-// ─────────────────────────────────────────────────────────────
-//   passes — separate table because §4.4 distinguishes them
-//   from likes. Same uniqueness rule.
-// ─────────────────────────────────────────────────────────────
-
+// passes — separate table (skip tracking, feed exclusion)
 model Pass {
   id         String   @id @default(uuid()) @db.Uuid
   fromUserId String   @map("from_user_id") @db.Uuid
@@ -641,7 +415,7 @@ model Pass {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 3.14 matches
+// matches
 // ─────────────────────────────────────────────────────────────
 
 model Match {
@@ -662,7 +436,6 @@ model Match {
   likeB    Like      @relation("MatchLikeB", fields: [likeBId], references: [id], onDelete: Cascade)
   messages Message[]
 
-  // Sorted-pair uniqueness — userAId < userBId enforced via CHECK in migration SQL.
   @@unique([userAId, userBId])
   @@index([userAId, status, lastMessageAt])
   @@index([userBId, status, lastMessageAt])
@@ -670,7 +443,7 @@ model Match {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 3.15 messages
+// messages
 // ─────────────────────────────────────────────────────────────
 
 model Message {
@@ -687,14 +460,13 @@ model Message {
   match  Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
   sender User  @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
 
-  // Idempotency: a sender can never persist the same clientId twice within a match.
   @@unique([matchId, senderId, clientId])
   @@index([matchId, createdAt])
   @@map("messages")
 }
 
 // ─────────────────────────────────────────────────────────────
-// 3.16 blocks + reports
+// blocks + reports
 // ─────────────────────────────────────────────────────────────
 
 model Block {
@@ -723,9 +495,7 @@ model Report {
   createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  reporter      User    @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
-  // target_id is polymorphic (profile / spot / event) — no DB FK; resolved
-  // in the app layer based on target_type.
+  reporter    User    @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
 
   @@index([status, createdAt])
   @@index([reporterId])
@@ -734,7 +504,7 @@ model Report {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 3.17 emergency_contacts
+// emergency_contacts
 // ─────────────────────────────────────────────────────────────
 
 model EmergencyContact {
@@ -753,7 +523,7 @@ model EmergencyContact {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 3.18 notifications + device_tokens
+// notifications + device_tokens
 // ─────────────────────────────────────────────────────────────
 
 model Notification {
@@ -786,7 +556,7 @@ model DeviceToken {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 3.19 linked_accounts
+// linked_accounts
 // ─────────────────────────────────────────────────────────────
 
 model LinkedAccount {
@@ -805,7 +575,7 @@ model LinkedAccount {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 3.20 user_settings (notification + privacy toggles)
+// user_settings
 // ─────────────────────────────────────────────────────────────
 
 model UserSettings {
@@ -814,17 +584,17 @@ model UserSettings {
   notifyMatches     Boolean  @default(true)  @map("notify_matches")
   notifyMessages    Boolean  @default(true)  @map("notify_messages")
   notifyLikes       Boolean  @default(true)  @map("notify_likes")
-  notifyPlaces      Boolean  @default(true)  @map("notify_places")
-  notifyEvents      Boolean  @default(true)  @map("notify_events")
+  notifyPlaces      Boolean  @default(true)  @map("notify_places")   // vestigial toggle; harmless
+  notifyEvents      Boolean  @default(true)  @map("notify_events")   // vestigial toggle; harmless
   notifyNews        Boolean  @default(false) @map("notify_news")
   emailDigest       Boolean  @default(false) @map("email_digest")
-  quietHoursStart   Int?     @map("quiet_hours_start")  // 0-23, local hour
+  quietHoursStart   Int?     @map("quiet_hours_start")
   quietHoursEnd     Int?     @map("quiet_hours_end")
 
   readReceipts      Boolean  @default(true) @map("read_receipts")
   activeStatus      Boolean  @default(true) @map("active_status")
   blurExplicit      Boolean  @default(true) @map("blur_explicit")
-  showMeOnPlaces    Boolean  @default(true) @map("show_me_on_places")
+  showMeOnPlaces    Boolean  @default(true) @map("show_me_on_places") // vestigial; kept to avoid a needless drop
 
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -835,13 +605,12 @@ model UserSettings {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Discovery filters (implicit, from §4.3 PUT /filters)
+// filters
 // ─────────────────────────────────────────────────────────────
 
 model Filters {
   userId          String   @id @map("user_id") @db.Uuid
 
-  // Multi-select arrays
   lookingFor      String[] @map("looking_for")
   relationship    String[]
   drinks          String[]
@@ -860,7 +629,7 @@ model Filters {
   heightMinCm     Int      @default(120) @map("height_min_cm")
   heightMaxCm     Int      @default(220) @map("height_max_cm")
   distanceMi      Int      @default(25) @map("distance_mi")
-  showMeOnPlaces  Boolean  @default(true) @map("show_me_on_places")
+  showMeOnPlaces  Boolean  @default(true) @map("show_me_on_places") // vestigial
 
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -878,8 +647,8 @@ model RefreshToken {
   id         String   @id @default(uuid()) @db.Uuid
   userId     String   @map("user_id") @db.Uuid
   tokenHash  String   @unique @map("token_hash")
-  family     String                              // rotation family id
-  parentId   String?  @map("parent_id") @db.Uuid // previous token in chain
+  family     String
+  parentId   String?  @map("parent_id") @db.Uuid
   userAgent  String?  @map("user_agent")
   ip         String?
   expiresAt  DateTime @map("expires_at") @db.Timestamptz(6)
@@ -894,7 +663,7 @@ model RefreshToken {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Auth — OTP attempt log (rate-limiting + lockout)
+// Auth — OTP attempts
 // ─────────────────────────────────────────────────────────────
 
 model OtpAttempt {
@@ -912,71 +681,15 @@ model OtpAttempt {
 }
 
 // ─────────────────────────────────────────────────────────────
-// User-suggested places ("can't see your favorite? send us a note.")
-// ─────────────────────────────────────────────────────────────
-
-model PlaceRequest {
-  id          String              @id @default(uuid()) @db.Uuid
-  userId      String              @map("user_id") @db.Uuid
-  label       String
-  address     String?
-  detail      String
-  status      PlaceRequestStatus  @default(pending)
-  reviewedBy  String?             @map("reviewed_by") @db.Uuid
-  createdAt   DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([status, createdAt])
-  @@map("place_requests")
-}
-
-// ─────────────────────────────────────────────────────────────
-// §9 Admin — admin_users + admin_audit
-// ─────────────────────────────────────────────────────────────
-
-model AdminUser {
-  id           String    @id @default(uuid()) @db.Uuid
-  email        String    @unique
-  passwordHash String    @map("password_hash")
-  role         AdminRole @default(moderator)
-  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz(6)
-  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  audits AdminAudit[]
-
-  @@map("admin_users")
-}
-
-model AdminAudit {
-  id        String   @id @default(uuid()) @db.Uuid
-  adminId   String   @map("admin_id") @db.Uuid
-  action    String
-  target    String
-  before    Json?
-  after     Json?
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  admin AdminUser @relation(fields: [adminId], references: [id], onDelete: Cascade)
-
-  @@index([adminId, createdAt])
-  @@index([target])
-  @@map("admin_audit")
-}
-
-// ─────────────────────────────────────────────────────────────
-// Feed-weight config (singleton row; tunable from /admin/config)
+// Feed-weight config (singleton, tunable — 5 terms now)
 // ─────────────────────────────────────────────────────────────
 
 model FeedConfig {
   id                       Int      @id @default(1)
-  wRecency                 Float    @default(0.25) @map("w_recency")
-  wMutualInterests         Float    @default(0.20) @map("w_mutual_interests")
-  wSameSpot                Float    @default(0.20) @map("w_same_spot")
-  wDistance                Float    @default(0.15) @map("w_distance")
-  wReciprocal              Float    @default(0.15) @map("w_reciprocal")
+  wRecency                 Float    @default(0.30) @map("w_recency")
+  wMutualInterests         Float    @default(0.25) @map("w_mutual_interests")
+  wDistance                Float    @default(0.20) @map("w_distance")
+  wReciprocal              Float    @default(0.20) @map("w_reciprocal")
   wRecentlyShownPenalty    Float    @default(0.05) @map("w_recently_shown_penalty")
   updatedAt                DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 

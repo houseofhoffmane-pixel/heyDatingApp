@@ -1,9 +1,9 @@
 import { bootTestApp, closeTestApp, TestApp } from '../setup/test-app';
-import { cleanDb, disconnectTestPrisma, flushTestRedis, testPrisma } from '../setup/db';
+import { cleanDb, disconnectTestPrisma, flushTestRedis } from '../setup/db';
 import { createUser } from '../helpers/profile.helper';
 import { api } from '../helpers/api';
 
-describe('Onboarding / Auth (§8 #1-#5)', () => {
+describe('Onboarding / Auth (§8 #1-#4)', () => {
   let t: TestApp;
 
   beforeAll(async () => { t = await bootTestApp(); });
@@ -25,8 +25,8 @@ describe('Onboarding / Auth (§8 #1-#5)', () => {
     expect(res.body.error.code).toBe('UNDERAGE');
   });
 
-  // #2 — age_confirmed=false blocks the readiness check (we still accept the patch).
-  it('blocks pending_verification when age_confirmed is false', async () => {
+  // #2 — ageConfirmed=false blocks activation (patch itself succeeds).
+  it('blocks activation when ageConfirmed is false', async () => {
     await api.post(t, '/auth/otp/request', { phone_e164: '+15550102222' }).expect(200);
     const v = await api.post(t, '/auth/otp/verify', { phone_e164: '+15550102222', code: '123456' }).expect(200);
     const token = v.body.accessToken;
@@ -43,7 +43,7 @@ describe('Onboarding / Auth (§8 #1-#5)', () => {
     const state = await api.get(t, '/onboarding/state', token).expect(200);
     expect(state.body.completeness.satisfied.ageConfirmed).toBe(false);
     expect(state.body.completeness.missing).toContain('ageConfirmed');
-    expect(state.body.canSubmitForVerification).toBe(false);
+    expect(state.body.canActivate).toBe(false);
   });
 
   // #3 — wrong OTP returns OTP_INVALID, 5 fails locks the phone.
@@ -78,22 +78,5 @@ describe('Onboarding / Auth (§8 #1-#5)', () => {
     expect('school' in me.body).toBe(false);
     expect('starSign' in me.body).toBe(false);
     expect('drinks' in me.body).toBe(false);
-  });
-
-  // #5 — verification pending → not discoverable; profile detail 403 NOT_VERIFIED.
-  it('does not surface unverified users in feed; profile detail 403', async () => {
-    const viewer  = await createUser(t, { location: { lat: 40.7194, lng: -73.9963 } });
-    const target  = await createUser(t, {
-      skipVerification: true,
-      location: { lat: 40.7194, lng: -73.9963 },
-    });
-
-    const feed = await api.get(t, '/discovery/feed', viewer.token).expect(200);
-    const ids = feed.body.data.map((p: any) => p.userId);
-    expect(ids).not.toContain(target.userId);
-
-    const detail = await api.get(t, `/discovery/profile/${target.userId}`, viewer.token);
-    expect(detail.status).toBe(403);
-    expect(detail.body.error.code).toBe('NOT_VERIFIED');
   });
 });

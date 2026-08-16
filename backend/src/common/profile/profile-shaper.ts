@@ -99,7 +99,6 @@ export class ProfileShaper {
       relationshipIntent: profile.relationshipIntent,
       heightCm: profile.heightCm,
       bio: profile.bio,
-      isVerified: await this.isVerified(user.id),
       lastActiveAt: user.lastActiveAt.toISOString(),
     };
 
@@ -176,13 +175,6 @@ export class ProfileShaper {
     };
   }
 
-  private async isVerified(userId: string): Promise<boolean> {
-    const row = await this.prisma.verification.findFirst({
-      where: { userId, status: 'approved' },
-      select: { id: true },
-    });
-    return !!row;
-  }
 }
 
 // ─────────────────────────────────────────────────────────────

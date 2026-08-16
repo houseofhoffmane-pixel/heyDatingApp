@@ -16,8 +16,7 @@ import { ApiError } from '../../../common/errors/api-error';
  * and short-lived.
  *
  * Anything except the URL signing is identical to what the S3 provider
- * exposes — callers (PhotosService, VerificationService) don't know which
- * one's mounted.
+ * exposes — callers (PhotosService) don't know which one's mounted.
  */
 @Injectable()
 export class StorageStubProvider implements StorageProvider {

@@ -10,7 +10,8 @@ import { PhotoModerationStubProvider } from './providers/moderation.stub.provide
     PhotosService,
     PhotoModerationStubProvider,
     {
-      // Step 4 swaps a Rekognition implementation in via env-driven select.
+      // Stub approves every upload. Swap to a real moderator (Rekognition
+      // DetectModerationLabels or similar) via env-driven select later.
       provide: PHOTO_MODERATION,
       useExisting: PhotoModerationStubProvider,
     },

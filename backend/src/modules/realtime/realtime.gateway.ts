@@ -80,7 +80,6 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
 
     await socket.join(`user:${userId}`);
     await this.joinActiveMatches(socket, userId);
-    await this.joinActiveCheckins(socket, userId);
 
     // Presence: SADD this socket's id; refresh TTL so dropped clients age out.
     await this.redis.client.sadd(`presence:${userId}`, socket.id);
@@ -107,22 +106,6 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       select: { id: true },
     });
     await Promise.all(matches.map((m) => socket.join(`match:${m.id}`)));
-  }
-
-  /**
-   * Re-join place/event check-in rooms after a reconnect so the socket
-   * continues to receive `place:count` broadcasts (step 8) and
-   * `presence:update` (step 7+).
-   */
-  private async joinActiveCheckins(socket: Socket, userId: string) {
-    const checkins = await this.prisma.checkin.findMany({
-      where: { userId, leftAt: null, expiresAt: { gt: new Date() } },
-      select: { placeId: true, eventId: true },
-    });
-    for (const c of checkins) {
-      if (c.placeId) await socket.join(`place:${c.placeId}`);
-      if (c.eventId) await socket.join(`event:${c.eventId}`);
-    }
   }
 }
 

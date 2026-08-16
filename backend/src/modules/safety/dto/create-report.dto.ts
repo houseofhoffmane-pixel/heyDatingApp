@@ -1,9 +1,8 @@
 import { IsIn, IsString, IsUUID, Length } from 'class-validator';
 
-const TARGETS = ['profile', 'spot', 'event'] as const;
+const TARGETS = ['profile'] as const;
 const REASONS = [
-  'fake', 'inappropriate', 'harassment', 'spam', 'underage', 'scam',
-  'closed', 'wrong_info', 'unsafe', 'duplicate', 'misleading', 'cancelled', 'other',
+  'fake', 'inappropriate', 'harassment', 'spam', 'underage', 'scam', 'other',
 ] as const;
 
 export class CreateReportDto {

@@ -7,13 +7,12 @@ import { loadEnv } from '../../common/config/env';
 import { CreateReportDto } from './dto/create-report.dto';
 
 /**
- * Profile/spot/event reporting. Detail length is enforced three ways:
+ * Profile reporting. Detail length is enforced three ways:
  *   1. DTO `@Length(10, 280)`
  *   2. Service trim+check below (in case the DTO is bypassed in tests)
  *   3. DB CHECK constraint (`CHAR_LENGTH(TRIM(detail)) >= 10`)
  *
- * Target existence is validated against the right table per targetType so
- * the admin queue (Step 12) never sees reports against vanished entities.
+ * Only 'profile' targets remain after Sprint 1 (spots/events removed).
  */
 @Injectable()
 export class ReportsService {
@@ -77,12 +76,6 @@ export class ReportsService {
       }
       const exists = await this.prisma.user.findUnique({ where: { id: targetId } });
       if (!exists) throw ApiError.notFound('TARGET_NOT_FOUND', 'Profile not found.');
-    } else if (targetType === 'spot') {
-      const exists = await this.prisma.place.findUnique({ where: { id: targetId } });
-      if (!exists) throw ApiError.notFound('TARGET_NOT_FOUND', 'Spot not found.');
-    } else if (targetType === 'event') {
-      const exists = await this.prisma.event.findUnique({ where: { id: targetId } });
-      if (!exists) throw ApiError.notFound('TARGET_NOT_FOUND', 'Event not found.');
     }
   }
 }

@@ -1,6 +1,7 @@
 import { IsBoolean, IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 
-const VISIBILITIES = ['everyone', 'liked_only', 'spot_only'] as const;
+// spot_only visibility was removed with spots/events.
+const VISIBILITIES = ['everyone', 'liked_only'] as const;
 
 export class PutSettingsDto {
   @IsOptional() @IsBoolean() notifyMatches?: boolean;

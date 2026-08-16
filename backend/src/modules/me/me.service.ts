@@ -4,7 +4,6 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { ApiError } from '../../common/errors/api-error';
 import { ProfileShaper } from '../../common/profile/profile-shaper';
 import { TokensService } from '../auth/tokens.service';
-import { CheckinService } from '../places/checkin.service';
 import { PatchProfileDto } from '../onboarding/dto/patch-profile.dto';
 import { OnboardingService } from '../onboarding/onboarding.service';
 import { PutSettingsDto } from './dto/put-settings.dto';
@@ -24,7 +23,6 @@ export class MeService {
     private readonly shaper: ProfileShaper,
     private readonly tokens: TokensService,
     private readonly onboarding: OnboardingService,
-    private readonly checkins: CheckinService,
   ) {}
 
   // ── GET /me ──────────────────────────────────────────────────
@@ -130,11 +128,6 @@ export class MeService {
       },
     });
 
-    // Hidden = drop all active checkins so the spot rosters lose the user.
-    if (dto.status === 'hidden') {
-      await this.silentLeaveAll(userId);
-    }
-
     return { ok: true, status: dto.status };
   }
 
@@ -150,9 +143,6 @@ export class MeService {
 
     // Revoke every refresh token so existing sessions die immediately.
     await this.tokens.revokeAllForUser(userId);
-
-    // Active checkins → leave so spot rosters update right now.
-    await this.silentLeaveAll(userId);
 
     // End every active match. Other party sees "user unavailable".
     await this.prisma.match.updateMany({
@@ -235,18 +225,5 @@ export class MeService {
       where: { userId, provider: provider as LinkedProvider },
     });
     return { ok: true };
-  }
-
-  // ── shared helper ────────────────────────────────────────────
-
-  private async silentLeaveAll(userId: string) {
-    const active = await this.prisma.checkin.findMany({
-      where: { userId, leftAt: null },
-      select: { placeId: true, eventId: true },
-    });
-    await Promise.all(active.map(async (c) => {
-      if (c.placeId) await this.checkins.leavePlace(userId, c.placeId).catch(() => undefined);
-      if (c.eventId) await this.checkins.leaveEvent(userId, c.eventId).catch(() => undefined);
-    }));
   }
 }

@@ -8,17 +8,15 @@ export interface UserPublic {
   id: string;
   status: User['status'];
   visibility: User['visibility'];
-  isVerified: boolean;
   email: string | null;
   createdAt: string;
 }
 
-export function toUserPublic(user: User, isVerified: boolean): UserPublic {
+export function toUserPublic(user: User): UserPublic {
   return {
     id: user.id,
     status: user.status,
     visibility: user.visibility,
-    isVerified,
     email: user.email ?? null,
     createdAt: user.createdAt.toISOString(),
   };

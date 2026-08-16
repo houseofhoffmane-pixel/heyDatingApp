@@ -105,9 +105,10 @@ export class DiscoveryService {
       if (postFiltered.length === 0) return emptyFeed('no_matches');
     }
 
-    // ── score ────────────────────────────────────────────────
+    // ── score ─────────────────────────────────────────────────
+    // 5-term ranking now (was 6 in the spots/events version — dropped
+    // `same_spot_now` since there are no venues).
     const weights = await this.loadWeights();
-    const samePresenceIds = await this.coPresentUserIds(viewerId);
     const myInterestIds = await this.myInterestIds(viewerId);
     const shown = await this.feedShown.readMany(viewerId, postFiltered.map((c) => c.user_id));
 
@@ -118,7 +119,6 @@ export class DiscoveryService {
       const score =
         weights.wRecency * recencyScore(c.last_active_at) +
         weights.wMutualInterests * Math.min(mutualInterests / 6, 1) +
-        weights.wSameSpot * (samePresenceIds.has(c.user_id) ? 1 : 0) +
         weights.wDistance * Math.max(0, 1 - c.dist_m / Math.max(radiusM, 1)) +
         weights.wReciprocal * (c.they_liked_me ? 1 : 0) -
         weights.wRecentlyShownPenalty * Math.min((shown.get(c.user_id) ?? 0) / 5, 1);
@@ -145,7 +145,6 @@ export class DiscoveryService {
             viewerDistanceMi: distMi,
           })),
           theyLikedYou: s.row.they_liked_me,
-          sameSpot: samePresenceIds.has(s.row.user_id),
           _score: round(s.score, 3),
         };
       }),
@@ -186,19 +185,14 @@ export class DiscoveryService {
       throw ApiError.forbidden('PROFILE_UNAVAILABLE', 'This profile isn\'t available right now.');
     }
 
-    // Visibility gate: liked_only / spot_only require a specific relationship.
+    // Visibility gate: `liked_only` requires that they've liked me.
+    // (spot_only visibility was removed when spots/events went away.)
     if (target.visibility === 'liked_only') {
       const theyLikedMe = await this.prisma.like.findFirst({
         where: { fromUserId: targetUserId, toUserId: viewerId },
         select: { id: true },
       });
       if (!theyLikedMe) throw ApiError.forbidden('VISIBILITY_BLOCKED', 'Profile not available.');
-    }
-    if (target.visibility === 'spot_only') {
-      const coPresent = await this.coPresentUserIds(viewerId);
-      if (!coPresent.has(targetUserId)) {
-        throw ApiError.forbidden('VISIBILITY_BLOCKED', 'Profile not available.');
-      }
     }
 
     // Compute distance for display (rounded, never raw lat/lng).
@@ -311,14 +305,6 @@ export class DiscoveryService {
           OR (u.visibility = 'liked_only' AND EXISTS (
             SELECT 1 FROM likes l WHERE l.from_user_id = u.id AND l.to_user_id = ${viewerId}::uuid
           ))
-          OR (u.visibility = 'spot_only' AND EXISTS (
-            SELECT 1 FROM checkins ca, checkins cb
-            WHERE ca.user_id = ${viewerId}::uuid AND cb.user_id = u.id
-              AND ca.left_at IS NULL AND cb.left_at IS NULL
-              AND ca.expires_at > NOW() AND cb.expires_at > NOW()
-              AND ((ca.place_id IS NOT NULL AND ca.place_id = cb.place_id)
-                OR (ca.event_id IS NOT NULL AND ca.event_id = cb.event_id))
-          ))
         )
       ORDER BY dist_m ASC
       LIMIT 500
@@ -333,21 +319,6 @@ export class DiscoveryService {
       WHERE "user_id" = ${userId}::uuid AND "location" IS NOT NULL
     `;
     return rows[0] ?? null;
-  }
-
-  private async coPresentUserIds(viewerId: string): Promise<Set<string>> {
-    const rows = await this.prisma.$queryRaw<{ user_id: string }[]>`
-      SELECT DISTINCT cb.user_id
-      FROM checkins ca
-      JOIN checkins cb ON
-        (ca.place_id IS NOT NULL AND ca.place_id = cb.place_id)
-        OR (ca.event_id IS NOT NULL AND ca.event_id = cb.event_id)
-      WHERE ca.user_id = ${viewerId}::uuid
-        AND cb.user_id <> ${viewerId}::uuid
-        AND ca.left_at IS NULL AND cb.left_at IS NULL
-        AND ca.expires_at > NOW() AND cb.expires_at > NOW()
-    `;
-    return new Set(rows.map((r) => r.user_id));
   }
 
   private async myInterestIds(viewerId: string): Promise<Set<string>> {
@@ -366,7 +337,6 @@ export class DiscoveryService {
     return {
       wRecency: env.FEED_W_RECENCY,
       wMutualInterests: env.FEED_W_MUTUAL_INTERESTS,
-      wSameSpot: env.FEED_W_SAME_SPOT,
       wDistance: env.FEED_W_DISTANCE,
       wReciprocal: env.FEED_W_RECIPROCAL,
       wRecentlyShownPenalty: env.FEED_W_RECENT_SHOWN_PENALTY,

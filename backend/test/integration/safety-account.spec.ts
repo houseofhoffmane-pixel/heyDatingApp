@@ -29,8 +29,8 @@ describe('Safety / account lifecycle (§8 #26-#29)', () => {
     expect(ok.body.status).toBe('pending');
   });
 
-  // #27 — paused = invisible to new people; hidden = invisible everywhere (no checkins).
-  it('paused and hidden statuses remove the user from discovery + spots', async () => {
+  // #27 — paused and hidden statuses remove the user from discovery.
+  it('paused and hidden statuses remove the user from discovery', async () => {
     const viewer = await createUser(t, { lookingFor: ['everyone'], location: NYC });
     const target = await createUser(t, { gender: 'man', lookingFor: ['everyone'], location: NYC });
 
@@ -43,11 +43,10 @@ describe('Safety / account lifecycle (§8 #26-#29)', () => {
     const paused = await api.get(t, '/discovery/feed', viewer.token).expect(200);
     expect(paused.body.data.map((p: any) => p.userId)).not.toContain(target.userId);
 
-    // hidden: also tears down any active check-ins. Confirm via DB.
+    // hidden: same exclusion.
     await api.put(t, '/account/status', { status: 'hidden' }, target.token).expect(200);
-    const prisma = testPrisma();
-    const active = await prisma.checkin.count({ where: { userId: target.userId, leftAt: null } });
-    expect(active).toBe(0);
+    const hidden = await api.get(t, '/discovery/feed', viewer.token).expect(200);
+    expect(hidden.body.data.map((p: any) => p.userId)).not.toContain(target.userId);
   });
 
   // #28 — delete: soft-delete sets deleted_at + status='deleted', revokes refresh tokens.

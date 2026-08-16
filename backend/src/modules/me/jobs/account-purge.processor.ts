@@ -8,10 +8,9 @@ import { loadEnv } from '../../../common/config/env';
 /**
  * Hard-deletes accounts that were soft-deleted more than
  * `ACCOUNT_PURGE_DAYS` (default 30) ago. Cascade FKs on the schema do most
- * of the work — profile, photos, matches, messages, blocks, verifications,
- * device tokens, refresh tokens, notifications all cascade off the user
- * row. We also remove any remaining photo objects from storage to keep the
- * bucket clean.
+ * of the work — profile, photos, matches, messages, blocks, device tokens,
+ * refresh tokens, notifications all cascade off the user row. We also
+ * remove any remaining photo objects from storage to keep the bucket clean.
  *
  * Daily at 03:00 server time.
  */
@@ -46,17 +45,12 @@ export class AccountPurgeProcessor {
           where: { userId: u.id },
           select: { s3Key: true },
         });
-        const selfies = await this.prisma.verification.findMany({
-          where: { userId: u.id },
-          select: { selfieS3Key: true },
-        });
 
         await this.prisma.user.delete({ where: { id: u.id } });
 
-        await Promise.all([
-          ...photos.map((p) => this.storage.remove(p.s3Key).catch(() => undefined)),
-          ...selfies.map((s) => this.storage.remove(s.selfieS3Key).catch(() => undefined)),
-        ]);
+        await Promise.all(
+          photos.map((p) => this.storage.remove(p.s3Key).catch(() => undefined)),
+        );
       }
       this.logger.log(`purged ${due.length} accounts`);
     } catch (err: any) {

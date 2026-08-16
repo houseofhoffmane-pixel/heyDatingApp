@@ -1,8 +1,11 @@
 /**
  * Typed environment loader. Parses & validates process.env once, exposes
- * everything as `env`. Throws on boot if a required var is missing in
- * production. In development missing vars fall back to safe defaults
- * (matching docker-compose).
+ * everything as `env`. Throws on boot if a required var is missing.
+ * In development missing vars fall back to safe defaults (matching
+ * docker-compose).
+ *
+ * Ship-scope after Sprint 1 — no admin, verification, geocoding, or
+ * check-in vars. Redis stays for Sprint 1; Sprint 2 removes it.
  */
 
 import { z } from 'zod';
@@ -20,9 +23,6 @@ const schema = z.object({
   JWT_ACCESS_TTL: z.string().default('15m'),
   JWT_REFRESH_TTL: z.string().default('60d'),
 
-  ADMIN_JWT_SECRET: z.string().min(16),
-  ADMIN_JWT_TTL: z.string().default('8h'),
-
   TWILIO_PROVIDER: z.enum(['stub', 'real']).default('stub'),
   TWILIO_ACCOUNT_SID: z.string().optional(),
   TWILIO_AUTH_TOKEN: z.string().optional(),
@@ -39,33 +39,21 @@ const schema = z.object({
   PHOTO_MAX_MB: z.coerce.number().int().positive().default(10),
   STORAGE_URL_TTL_S: z.coerce.number().int().positive().default(900),
 
-  REKOGNITION_PROVIDER: z.enum(['stub', 'real']).default('stub'),
-  REKOGNITION_REGION: z.string().default('us-east-1'),
-  FACE_MATCH_THRESHOLD: z.coerce.number().min(0).max(100).default(90),
-  REKOGNITION_STUB_CONFIDENCE: z.coerce.number().min(0).max(100).default(95),
-
   FCM_PROVIDER: z.enum(['stub', 'real']).default('stub'),
   FCM_PROJECT_ID: z.string().optional(),
   FCM_CREDENTIALS_JSON: z.string().optional(),
 
-  MAPBOX_PROVIDER: z.enum(['stub', 'real']).default('stub'),
-  MAPBOX_TOKEN: z.string().optional(),
-
-  CHECKIN_RADIUS_M: z.coerce.number().int().positive().default(100),
-  CHECKIN_TTL_HOURS: z.coerce.number().positive().default(2),
   UNMATCH_SILENCE_DAYS: z.coerce.number().int().positive().default(14),
   ACCOUNT_PURGE_DAYS: z.coerce.number().int().positive().default(30),
 
-  FEED_W_RECENCY: z.coerce.number().default(0.25),
-  FEED_W_MUTUAL_INTERESTS: z.coerce.number().default(0.20),
-  FEED_W_SAME_SPOT: z.coerce.number().default(0.20),
-  FEED_W_DISTANCE: z.coerce.number().default(0.15),
-  FEED_W_RECIPROCAL: z.coerce.number().default(0.15),
+  FEED_W_RECENCY: z.coerce.number().default(0.30),
+  FEED_W_MUTUAL_INTERESTS: z.coerce.number().default(0.25),
+  FEED_W_DISTANCE: z.coerce.number().default(0.20),
+  FEED_W_RECIPROCAL: z.coerce.number().default(0.20),
   FEED_W_RECENT_SHOWN_PENALTY: z.coerce.number().default(0.05),
 
   RL_OTP_PER_HOUR: z.coerce.number().int().default(5),
   RL_LIKES_PER_DAY: z.coerce.number().int().default(200),
-  RL_CHECKINS_PER_5MIN: z.coerce.number().int().default(1),
   RL_REPORTS_PER_DAY: z.coerce.number().int().default(10),
   RL_MESSAGES_PER_MIN: z.coerce.number().int().default(60),
 });

@@ -1,4 +1,4 @@
-import { PhotoStatus, UserStatus, VerificationStatus } from '@prisma/client';
+import { PhotoStatus, UserStatus } from '@prisma/client';
 import { testPrisma } from '../setup/db';
 import { api } from './api';
 import type { TestApp } from '../setup/test-app';
@@ -22,12 +22,10 @@ export interface TestUser {
 
 /**
  * Walk the real onboarding API end-to-end so the user behaves exactly
- * like a production-onboarded account. The final step *bypasses* the
- * face-match queue and flips the verification + user.status directly so
- * tests don't have to wait on BullMQ.
- *
- * Pass `{ skipVerification: true }` to leave the account in
- * `pending_verification` for negative-path tests.
+ * like a production-onboarded account, then flip status to `active`.
+ * Face verification was removed from the ship-scope onboarding flow
+ * (Sprint 1) — photos are still required, but there is no selfie
+ * step and no BullMQ queue to bypass.
  */
 export async function createUser(
   t: TestApp,
@@ -38,7 +36,6 @@ export async function createUser(
     lookingFor: ('women' | 'men' | 'non-binary' | 'everyone')[];
     bio: string;
     location: { lat: number; lng: number };
-    skipVerification: boolean;
   }> = {},
 ): Promise<TestUser> {
   const phone = nextPhone();
@@ -93,22 +90,11 @@ export async function createUser(
     await api.put(t, '/me/location', opts.location, accessToken).expect(200);
   }
 
-  // 7) Verification — direct DB flip (bypass the async worker).
-  if (!opts.skipVerification) {
-    await prisma.verification.create({
-      data: {
-        userId: user.id,
-        selfieS3Key: `selfies/${user.id}.jpg`,
-        status: VerificationStatus.approved,
-        matchConfidence: 95,
-        attempt: 1,
-      },
-    });
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { status: UserStatus.active },
-    });
-  }
+  // 7) Flip to active (no verification step in ship-scope).
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { status: UserStatus.active },
+  });
 
   return { userId: user.id, token: accessToken, refreshToken, phone, name, gender };
 }
@@ -119,43 +105,4 @@ export function expectStatus(res: { status: number; body: any }, expected: numbe
       `expected ${expected}, got ${res.status}\nbody: ${JSON.stringify(res.body, null, 2)}`,
     );
   }
-}
-
-/** Seed a place with explicit coordinates. */
-export async function makeTestPlace(opts: { label?: string; lat: number; lng: number; kind?: string }) {
-  const prisma = testPrisma();
-  // Need a city to satisfy the FK — reuse the NYC seed.
-  const city = await prisma.city.findFirstOrThrow();
-  const inserted = await prisma.$queryRaw<{ id: string }[]>`
-    INSERT INTO "places" ("label","kind","vibe","address","icon","tone","hot","city_id","location")
-    VALUES (${opts.label ?? 'Test Spot'}, ${opts.kind ?? 'coffee'}, 'test',
-            'test address', 'coffee', 'peach', false, ${city.id}::uuid,
-            ST_SetSRID(ST_MakePoint(${opts.lng}, ${opts.lat}), 4326)::geography)
-    RETURNING "id"
-  `;
-  return inserted[0].id;
-}
-
-/** Seed an event with explicit coordinates and time window. */
-export async function makeTestEvent(opts: {
-  title?: string;
-  lat: number; lng: number;
-  startsAt: Date; endsAt: Date;
-  placeId?: string | null;
-}) {
-  const prisma = testPrisma();
-  const city = await prisma.city.findFirstOrThrow();
-  const inserted = await prisma.$queryRaw<{ id: string }[]>`
-    INSERT INTO "events"
-      ("title","host","vibe","place_id","starts_at","ends_at","door_text","cover_text",
-       "city_id","tags","icon","tone","hot","location")
-    VALUES
-      (${opts.title ?? 'Test Event'}, 'host', 'vibe',
-       ${opts.placeId ?? null}::uuid,
-       ${opts.startsAt}::timestamptz, ${opts.endsAt}::timestamptz,
-       'when', 'free', ${city.id}::uuid, '{}'::text[], 'music', 'sky', false,
-       ST_SetSRID(ST_MakePoint(${opts.lng}, ${opts.lat}), 4326)::geography)
-    RETURNING "id"
-  `;
-  return inserted[0].id;
 }

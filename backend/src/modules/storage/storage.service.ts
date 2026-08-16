@@ -2,10 +2,9 @@ import { Inject, Injectable } from '@nestjs/common';
 import { STORAGE_PROVIDER, StorageProvider, SignedUploadUrl, HeadResult } from './providers/storage.provider';
 
 /**
- * Thin facade so feature modules (PhotosService, VerificationService,
- * AdminPlacesService) inject one consistent service rather than the
- * provider token directly. Keeps the provider swap (`STORAGE_PROVIDER=stub
- * | real`) invisible to callers.
+ * Thin facade so feature modules (PhotosService) inject one consistent
+ * service rather than the provider token directly. Keeps the provider
+ * swap (`STORAGE_PROVIDER=stub | real`) invisible to callers.
  */
 @Injectable()
 export class StorageService {

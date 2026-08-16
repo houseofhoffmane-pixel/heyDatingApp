@@ -20,11 +20,9 @@ import { SetEmailPassDto } from './dto/set-email-pass.dto';
  *   - dob → age must be ≥ 18 (else 422 UNDERAGE)
  *   - age_confirmed must be true to count as "set"
  *   - bio ≤ 180 chars, prompt answer ≤ 140, looking_for ⊆ canonical set
- *   - All mandatory fields present before status can flip to
- *     `pending_verification` — handled in completeOnboarding() once the
- *     user submits for verification (called by VerificationService in
- *     Step 4 but the helper lives here so onboarding can also "preview"
- *     readiness from its state endpoint).
+ *   - All mandatory fields present before status can flip to `active` —
+ *     handled in completeOnboarding() once the user finishes onboarding.
+ *     The state endpoint previews the same readiness check.
  */
 @Injectable()
 export class OnboardingService {
@@ -214,13 +212,10 @@ export class OnboardingService {
   // ── Shared: enforce mandatory fields and flip status ─────────
 
   /**
-   * Web-flow completion — no verification gate. Once the user has all
-   * required fields set (name / dob / age_confirmed / gender / lookingFor
-   * / relationshipIntent / heightCm / bio + 3-6 interests + ≥1 prompt +
-   * ≥2 photos) they flip straight to `active` and become discoverable.
-   *
-   * Kept the historic name so VerificationService (dormant, retained for
-   * a future opt-in verify feature) still compiles.
+   * Web-flow completion. Once the user has all required fields set
+   * (name / dob / age_confirmed / gender / lookingFor / relationshipIntent
+   * / heightCm / bio + 3-6 interests + ≥1 prompt + ≥2 photos) they flip
+   * straight to `active` and become discoverable.
    */
   async completeOnboardingOrThrow(userId: string) {
     const loaded = await this.shaper.loadFull(userId);

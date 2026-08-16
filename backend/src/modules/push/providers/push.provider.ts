@@ -3,8 +3,7 @@
  *
  * Used by:
  *   - ChatService (Step 7) when sending a message to an offline recipient.
- *   - LikesService / VerificationService / EventsService (Step 10) for
- *     match / like / event-reminder / verification-complete pings.
+ *   - LikesService for like / match pings.
  *
  * Step 7 ships the stub (logs the payload). Step 10 wires FCM and the
  * preference / quiet-hours gating.

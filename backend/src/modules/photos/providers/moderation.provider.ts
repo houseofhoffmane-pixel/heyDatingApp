@@ -1,11 +1,10 @@
 /**
  * Photo moderation provider — used to flag NSFW or otherwise rejectable
- * uploads. Sync today (so confirm returns the final status immediately);
- * if the moderator becomes slow / external it can move behind BullMQ.
+ * uploads. Sync today (so confirm returns the final status immediately).
  *
- * One implementation lands in Step 3 (stub: always approve). Step 4
- * swaps in AWS Rekognition's DetectModerationLabels alongside the
- * face-match used for verification.
+ * Ship-scope: only the stub (always approve). Plug in a real moderator
+ * (AWS Rekognition DetectModerationLabels, Cloudflare NSFW, hand-rolled
+ * model, etc.) via the same factory pattern used elsewhere when needed.
  */
 export const PHOTO_MODERATION = Symbol('PHOTO_MODERATION');
 
