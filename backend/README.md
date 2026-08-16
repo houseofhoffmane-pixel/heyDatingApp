@@ -1,7 +1,7 @@
 # Hey — backend
 
-Node.js + NestJS + Prisma. Currently Postgres + PostGIS + Redis; Sprint 3
-swaps in MySQL 8 (JSON columns + `POINT SRID 4326`) so the app runs on
+Node.js + NestJS + Prisma. Currently Postgres + PostGIS; Sprint 3 swaps
+in MySQL 8 (JSON columns + `POINT SRID 4326`) so the app runs on
 Hostinger's managed MySQL and one Node process serves API + WebSockets +
 the built SPA.
 
@@ -9,11 +9,13 @@ Originally scaffolded from `../BACKEND_SPEC.md`. Sprint 1 stripped the
 schema and modules down to the ship-scope feature set — face
 verification, spots, events, admin console, and the BullMQ queue are
 gone; profile discovery, likes/matches, chat, and account safety remain.
+Sprint 2 removed Redis — presence, rate limits, the feed-shown cache,
+and cron locks all live in-process now (single-Node deploy).
 
 ## Quick start
 
 ```bash
-# 1. infra (Postgres+PostGIS, Redis) in Docker
+# 1. infra (Postgres+PostGIS) in Docker
 docker compose up -d
 
 # 2. install
@@ -188,5 +190,5 @@ Sprint 3 rewrites the schema for MySQL 8 and moves the SPA under
 `../public`. The single-process deploy runs `node backend/dist/main.js`
 from the repo root — `@nestjs/serve-static` reads from `join(__dirname,
 '..', 'public')` so the static assets resolve regardless of Hostinger's
-working directory. Redis is replaced by an in-memory presence adapter
-(Sprint 2) since Hostinger's shared plans don't include Redis.
+working directory. Sprint 2 already removed Redis, so the deploy is one
+Node process + one managed database — no other infra needed.

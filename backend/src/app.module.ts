@@ -5,7 +5,6 @@ import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 import { PrismaModule } from './prisma/prisma.module';
 import { GeoModule } from './common/geo/geo.module';
-import { RedisModule } from './common/redis/redis.module';
 import { RateLimitModule } from './common/ratelimit/ratelimit.module';
 import { ProfileModule } from './common/profile/profile.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -26,7 +25,9 @@ import { HealthController } from './health.controller';
 
 /**
  * Root module. Ship-scope feature set — no spots, events, verification,
- * geocoding, admin, or BullMQ queue (all removed in Sprint 1).
+ * geocoding, admin, or BullMQ queue (removed in Sprint 1). No Redis —
+ * presence, rate limits, feed-shown cache, and cron locks all live
+ * in-process (Sprint 2). Single Node process serves API + WS + SPA.
  */
 @Module({
   imports: [
@@ -45,7 +46,6 @@ import { HealthController } from './health.controller';
       },
     }),
     PrismaModule,
-    RedisModule,          // Sprint 2 removes this
     RateLimitModule,
     GeoModule,
     ProfileModule,

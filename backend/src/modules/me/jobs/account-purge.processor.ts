@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { RedisService } from '../../../common/redis/redis.service';
 import { StorageService } from '../../storage/storage.service';
 import { loadEnv } from '../../../common/config/env';
 
@@ -12,23 +11,24 @@ import { loadEnv } from '../../../common/config/env';
  * refresh tokens, notifications all cascade off the user row. We also
  * remove any remaining photo objects from storage to keep the bucket clean.
  *
- * Daily at 03:00 server time.
+ * Daily at 03:00 server time. In-flight guard replaces the Redis SETNX
+ * lock — single-process deploy on Hostinger means overlap can only come
+ * from a slow prior run.
  */
 @Injectable()
 export class AccountPurgeProcessor {
   private readonly logger = new Logger(AccountPurgeProcessor.name);
-  private readonly LOCK = 'cron:account-purge';
+  private running = false;
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly redis: RedisService,
     private readonly storage: StorageService,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async run() {
-    const got = await this.redis.client.set(this.LOCK, '1', 'EX', 60 * 60, 'NX');
-    if (got !== 'OK') return;
+    if (this.running) return;
+    this.running = true;
 
     try {
       const cutoff = new Date(Date.now() - loadEnv().ACCOUNT_PURGE_DAYS * 24 * 60 * 60 * 1000);
@@ -56,7 +56,7 @@ export class AccountPurgeProcessor {
     } catch (err: any) {
       this.logger.error(`account-purge failed: ${err?.message}`);
     } finally {
-      await this.redis.client.del(this.LOCK);
+      this.running = false;
     }
   }
 }

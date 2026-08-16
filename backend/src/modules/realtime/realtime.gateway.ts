@@ -2,11 +2,10 @@ import { Logger, OnModuleDestroy } from '@nestjs/common';
 import {
   OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit, WebSocketGateway, WebSocketServer,
 } from '@nestjs/websockets';
-import { createAdapter } from '@socket.io/redis-adapter';
 import { Server, Socket } from 'socket.io';
 import { TokensService } from '../auth/tokens.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { RedisService } from '../../common/redis/redis.service';
+import { PresenceService } from './presence.service';
 
 /**
  * Realtime gateway — single Socket.IO namespace `/rt`.
@@ -18,14 +17,10 @@ import { RedisService } from '../../common/redis/redis.service';
  * Rooms a socket auto-joins on connect:
  *   - user:<id>     personal — match:new, presence updates, system pings
  *   - match:<id>    one per active match — message:new, typing, message:read
- *   - place:<id>    if currently checked in (Step 8)
- *   - event:<id>    if currently checked in (Step 9)
  *
- * Presence: a Redis SET `presence:<userId>` holds the live socket IDs.
- * Non-empty ⇒ online. Cleared on disconnect.
- *
- * Redis adapter: pub + sub clients are duplicated off the main connection
- * so room messages fan out across multiple gateway instances.
+ * Presence: in-memory PresenceService holds `userId → Set<socketId>`.
+ * Single-process deploy makes this correct (Sprint 2 removed Redis and
+ * the socket.io Redis adapter — see PresenceService for the rationale).
  */
 @WebSocketGateway({
   namespace: '/rt',
@@ -40,16 +35,12 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   constructor(
     private readonly tokens: TokensService,
     private readonly prisma: PrismaService,
-    private readonly redis: RedisService,
+    private readonly presence: PresenceService,
   ) {}
 
   // ── Lifecycle ────────────────────────────────────────────────
 
-  async afterInit(server: Server) {
-    const pub = this.redis.duplicate();
-    const sub = this.redis.duplicate();
-    server.adapter(createAdapter(pub, sub));
-
+  afterInit(server: Server) {
     // Authenticate on the *raw* connection (before handleConnection), so
     // we never accept a socket without a valid token.
     server.use(async (socket, next) => {
@@ -80,18 +71,15 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
 
     await socket.join(`user:${userId}`);
     await this.joinActiveMatches(socket, userId);
-
-    // Presence: SADD this socket's id; refresh TTL so dropped clients age out.
-    await this.redis.client.sadd(`presence:${userId}`, socket.id);
-    await this.redis.client.expire(`presence:${userId}`, 90);
+    this.presence.add(userId, socket.id);
 
     this.logger.debug(`connect ${socket.id} → user=${userId}`);
   }
 
-  async handleDisconnect(socket: Socket) {
+  handleDisconnect(socket: Socket) {
     const userId = socket.data.userId as string | undefined;
     if (!userId) return;
-    await this.redis.client.srem(`presence:${userId}`, socket.id);
+    this.presence.remove(userId, socket.id);
     this.logger.debug(`disconnect ${socket.id} → user=${userId}`);
   }
 

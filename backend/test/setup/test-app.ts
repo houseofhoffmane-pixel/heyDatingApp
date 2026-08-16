@@ -5,12 +5,11 @@ import { AppModule } from '../../src/app.module';
 
 /**
  * Boots a complete Nest app on a random port so every spec exercises the
- * real HTTP + WebSocket surface (controllers, guards, gateway, Redis,
- * BullMQ, prisma).
+ * real HTTP + WebSocket surface (controllers, guards, gateway, prisma).
+ * Sprint 2 removed Redis, so there's nothing else to boot alongside.
  *
- * Each spec calls `bootTestApp()` in `beforeAll` and `app.close()` in
- * `afterAll`. The Redis + Prisma clients live in the app's DI container;
- * `app.close()` walks `OnModuleDestroy` so connections drain cleanly.
+ * Each spec calls `bootTestApp()` in `beforeAll` and `closeTestApp()` in
+ * `afterAll`. `app.close()` walks `OnModuleDestroy` so connections drain.
  */
 export interface TestApp {
   app: INestApplication;

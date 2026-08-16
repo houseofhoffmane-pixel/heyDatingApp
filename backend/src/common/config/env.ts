@@ -4,8 +4,8 @@
  * In development missing vars fall back to safe defaults (matching
  * docker-compose).
  *
- * Ship-scope after Sprint 1 — no admin, verification, geocoding, or
- * check-in vars. Redis stays for Sprint 1; Sprint 2 removes it.
+ * Ship-scope after Sprint 2 — no admin, verification, geocoding, or
+ * check-in vars, and no Redis. Single-process deploy on Hostinger.
  */
 
 import { z } from 'zod';
@@ -16,7 +16,6 @@ const schema = z.object({
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
 
   DATABASE_URL: z.string().url(),
-  REDIS_URL: z.string().url().default('redis://localhost:6379'),
 
   JWT_ACCESS_SECRET: z.string().min(16),
   JWT_REFRESH_SECRET: z.string().min(16),

@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { RedisService } from '../../../common/redis/redis.service';
 import { loadEnv } from '../../../common/config/env';
 
 /**
@@ -15,17 +14,14 @@ import { loadEnv } from '../../../common/config/env';
 @Injectable()
 export class UnmatchFairyProcessor {
   private readonly logger = new Logger(UnmatchFairyProcessor.name);
-  private readonly LOCK = 'cron:unmatch-fairy';
+  private running = false;
 
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly redis: RedisService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_4AM)
   async run() {
-    const got = await this.redis.client.set(this.LOCK, '1', 'EX', 60 * 60, 'NX');
-    if (got !== 'OK') return;
+    if (this.running) return;
+    this.running = true;
 
     try {
       const cutoff = new Date(Date.now() - loadEnv().UNMATCH_SILENCE_DAYS * 24 * 60 * 60 * 1000);
@@ -41,7 +37,7 @@ export class UnmatchFairyProcessor {
         this.logger.log(`unmatch-fairy expired ${result.count} silent matches`);
       }
     } finally {
-      await this.redis.client.del(this.LOCK);
+      this.running = false;
     }
   }
 }

@@ -92,7 +92,7 @@ export class ChatService {
 
     // Recipient-side flow: in-app row always; push only when offline (the
     // WS fan-out already covered live recipients).
-    const recipientOnline = await this.realtime.isUserOnline(otherUserId);
+    const recipientOnline = this.realtime.isUserOnline(otherUserId);
     const senderProfile = await this.prisma.profile.findUnique({
       where: { userId }, select: { name: true },
     });

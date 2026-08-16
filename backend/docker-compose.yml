@@ -1,5 +1,7 @@
 # Local dev infra for Hey backend.
-# `docker compose up -d` and the API can talk to Postgres+PostGIS and Redis.
+# `docker compose up -d` and the API can talk to Postgres+PostGIS.
+# (Redis was removed in Sprint 2 — presence, rate limits, and the
+# feed-shown cache all live in-process now.)
 
 services:
   postgres:
@@ -21,20 +23,5 @@ services:
       timeout: 3s
       retries: 20
 
-  redis:
-    image: redis:7-alpine
-    container_name: hey-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - hey-redisdata:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 3s
-      timeout: 3s
-      retries: 20
-
 volumes:
   hey-pgdata:
-  hey-redisdata:

@@ -1,64 +1,76 @@
-import { Injectable } from '@nestjs/common';
-import { RedisService } from '../redis/redis.service';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
 
 /**
- * Fixed-window rate limiting in Redis. Each key has an INCR + EXPIRE done
- * atomically; if the count exceeds the limit within the window the caller
- * gets back the seconds-remaining so the API can return 429 with the right
- * Retry-After.
+ * Fixed-window rate limiting, in-process. Same `hit()`/`peek()`/`reset()`
+ * shape as the old Redis-backed version — single-process deploy on
+ * Hostinger makes an in-memory Map correct.
  *
- * Limit math is intentionally simple — a sliding-window log is overkill
- * here. Quotas come from env (RL_*).
+ * Bucket = `{ count, windowEndsAt }`. Expiry is lazy on read + a periodic
+ * sweep so the map doesn't grow forever under weird key patterns.
  */
-@Injectable()
-export class RateLimitService {
-  constructor(private readonly redis: RedisService) {}
+type Bucket = { count: number; windowEndsAtMs: number };
 
-  /**
-   * Increment a counter and return whether the caller is over quota.
-   * `windowSeconds` resets the counter; `max` is the cap inside the window.
-   */
+@Injectable()
+export class RateLimitService implements OnModuleDestroy {
+  private readonly buckets = new Map<string, Bucket>();
+  private readonly sweep: NodeJS.Timeout;
+
+  constructor() {
+    // Sweep expired buckets every 5 minutes. `unref` so the interval
+    // doesn't keep the process alive during tests.
+    this.sweep = setInterval(() => this.gc(), 5 * 60 * 1000);
+    this.sweep.unref?.();
+  }
+
+  onModuleDestroy() {
+    clearInterval(this.sweep);
+  }
+
   async hit(
     key: string,
     max: number,
     windowSeconds: number,
   ): Promise<{ allowed: boolean; count: number; retryAfterSeconds: number }> {
-    const fullKey = `rl:${key}`;
-    const pipeline = this.redis.client.multi();
-    pipeline.incr(fullKey);
-    pipeline.ttl(fullKey);
-    const [[, countRaw], [, ttlRaw]] = (await pipeline.exec()) as [
-      [Error | null, number],
-      [Error | null, number],
-    ];
-    const count = Number(countRaw);
-    let ttl = Number(ttlRaw);
+    const now = Date.now();
+    const b = this.buckets.get(key);
 
-    // ttl=-1 means key exists with no expiry (race on first INCR before EXPIRE).
-    // ttl=-2 means key did not exist (treated as fresh window).
-    if (ttl < 0) {
-      await this.redis.client.expire(fullKey, windowSeconds);
-      ttl = windowSeconds;
+    if (!b || b.windowEndsAtMs <= now) {
+      const fresh: Bucket = { count: 1, windowEndsAtMs: now + windowSeconds * 1000 };
+      this.buckets.set(key, fresh);
+      return { allowed: 1 <= max, count: 1, retryAfterSeconds: 0 };
     }
 
-    const allowed = count <= max;
-    return { allowed, count, retryAfterSeconds: allowed ? 0 : ttl };
+    b.count += 1;
+    const allowed = b.count <= max;
+    const retryAfterSeconds = allowed
+      ? 0
+      : Math.max(1, Math.ceil((b.windowEndsAtMs - now) / 1000));
+    return { allowed, count: b.count, retryAfterSeconds };
   }
 
-  /**
-   * Read the current counter without incrementing (for "lockout" semantics
-   * where you want to refuse before counting).
-   */
   async peek(key: string): Promise<{ count: number; ttlSeconds: number }> {
-    const fullKey = `rl:${key}`;
-    const [count, ttl] = await Promise.all([
-      this.redis.client.get(fullKey).then((v) => (v ? Number(v) : 0)),
-      this.redis.client.ttl(fullKey),
-    ]);
-    return { count, ttlSeconds: ttl > 0 ? ttl : 0 };
+    const now = Date.now();
+    const b = this.buckets.get(key);
+    if (!b || b.windowEndsAtMs <= now) return { count: 0, ttlSeconds: 0 };
+    return {
+      count: b.count,
+      ttlSeconds: Math.max(0, Math.ceil((b.windowEndsAtMs - now) / 1000)),
+    };
   }
 
   async reset(key: string): Promise<void> {
-    await this.redis.client.del(`rl:${key}`);
+    this.buckets.delete(key);
+  }
+
+  /** Test-only — clear every bucket. Called from cleanDb() between specs. */
+  resetAll(): void {
+    this.buckets.clear();
+  }
+
+  private gc() {
+    const now = Date.now();
+    for (const [k, b] of this.buckets) {
+      if (b.windowEndsAtMs <= now) this.buckets.delete(k);
+    }
   }
 }

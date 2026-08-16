@@ -1,40 +1,74 @@
-import { Injectable } from '@nestjs/common';
-import { RedisService } from '../../common/redis/redis.service';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
 
 /**
  * Tracks "how many times has viewer X seen candidate Y in the last 24h".
- * Lives in Redis with a 24h TTL — the recency penalty in §7.3's ranking
- * formula reads this counter. INCR-on-render so a card flipping past gets
- * counted once.
+ * The recency-penalty term in the ranking formula reads this counter.
+ * INCR-on-render so a card flipping past gets counted once.
+ *
+ * Was Redis-backed pre-Sprint-2 (`feed:shown:<viewer>:<candidate>` with
+ * TTL 24h). Single-process deploy on Hostinger lets us keep it in an
+ * in-memory Map. Cap set to 100k entries with lazy expiry + periodic
+ * sweep so long-lived processes don't drift.
  */
-@Injectable()
-export class FeedShownService {
-  private readonly TTL_S = 24 * 60 * 60;
+type Bucket = { count: number; expiresAtMs: number };
 
-  constructor(private readonly redis: RedisService) {}
+@Injectable()
+export class FeedShownService implements OnModuleDestroy {
+  private readonly TTL_MS = 24 * 60 * 60 * 1000;
+  private readonly MAX_ENTRIES = 100_000;
+  private readonly buckets = new Map<string, Bucket>();
+  private readonly sweep: NodeJS.Timeout;
+
+  constructor() {
+    this.sweep = setInterval(() => this.gc(), 10 * 60 * 1000);
+    this.sweep.unref?.();
+  }
+
+  onModuleDestroy() {
+    clearInterval(this.sweep);
+  }
 
   private key(viewer: string, candidate: string): string {
-    return `feed:shown:${viewer}:${candidate}`;
+    return `${viewer}:${candidate}`;
   }
 
   async readMany(viewerId: string, candidateIds: string[]): Promise<Map<string, number>> {
     const map = new Map<string, number>();
     if (candidateIds.length === 0) return map;
-    const keys = candidateIds.map((c) => this.key(viewerId, c));
-    const vals = await this.redis.client.mget(...keys);
-    candidateIds.forEach((c, i) => {
-      map.set(c, vals[i] ? Number(vals[i]) : 0);
-    });
+    const now = Date.now();
+    for (const c of candidateIds) {
+      const b = this.buckets.get(this.key(viewerId, c));
+      map.set(c, b && b.expiresAtMs > now ? b.count : 0);
+    }
     return map;
   }
 
   async markShown(viewerId: string, candidateIds: string[]): Promise<void> {
     if (candidateIds.length === 0) return;
-    const pipe = this.redis.client.multi();
+    const now = Date.now();
     for (const c of candidateIds) {
-      pipe.incr(this.key(viewerId, c));
-      pipe.expire(this.key(viewerId, c), this.TTL_S);
+      const k = this.key(viewerId, c);
+      const existing = this.buckets.get(k);
+      if (existing && existing.expiresAtMs > now) {
+        existing.count += 1;
+        existing.expiresAtMs = now + this.TTL_MS;
+      } else {
+        this.buckets.set(k, { count: 1, expiresAtMs: now + this.TTL_MS });
+      }
     }
-    await pipe.exec();
+    // Cheap safety valve — if we've blown past the cap, run gc immediately.
+    if (this.buckets.size > this.MAX_ENTRIES) this.gc();
+  }
+
+  /** Test-only — clear the cache between specs. */
+  resetAll(): void {
+    this.buckets.clear();
+  }
+
+  private gc() {
+    const now = Date.now();
+    for (const [k, b] of this.buckets) {
+      if (b.expiresAtMs <= now) this.buckets.delete(k);
+    }
   }
 }

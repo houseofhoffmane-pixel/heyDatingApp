@@ -1,5 +1,5 @@
 import { bootTestApp, closeTestApp, TestApp } from '../setup/test-app';
-import { cleanDb, disconnectTestPrisma, flushTestRedis, testPrisma } from '../setup/db';
+import { cleanDb, disconnectTestPrisma, resetInMemory, testPrisma } from '../setup/db';
 import { createUser } from '../helpers/profile.helper';
 import { connectWs, emit, waitFor } from '../helpers/ws.helper';
 import { api } from '../helpers/api';
@@ -16,7 +16,7 @@ describe('Chat / real-time (§8 #22-#25)', () => {
 
   beforeEach(async () => {
     await cleanDb();
-    await flushTestRedis();
+    resetInMemory(t.app);
     A = await createUser(t, { lookingFor: ['everyone'], location: NYC });
     B = await createUser(t, { gender: 'man', lookingFor: ['everyone'], location: NYC });
 

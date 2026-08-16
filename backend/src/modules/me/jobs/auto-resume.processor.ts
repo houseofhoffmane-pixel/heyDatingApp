@@ -1,27 +1,23 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { RedisService } from '../../../common/redis/redis.service';
 
 /**
  * Flips paused/hidden users back to `active` once their `autoResumeAt`
- * passes. Runs every 15 minutes — finer granularity isn't necessary since
+ * passes. Runs every 30 minutes — finer granularity isn't necessary since
  * the user picks the date in the UI, not the minute.
  */
 @Injectable()
 export class AutoResumeProcessor {
   private readonly logger = new Logger(AutoResumeProcessor.name);
-  private readonly LOCK = 'cron:auto-resume';
+  private running = false;
 
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly redis: RedisService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   @Cron(CronExpression.EVERY_30_MINUTES)
   async run() {
-    const got = await this.redis.client.set(this.LOCK, '1', 'EX', 1500, 'NX');
-    if (got !== 'OK') return;
+    if (this.running) return;
+    this.running = true;
 
     try {
       const result = await this.prisma.user.updateMany({
@@ -35,7 +31,7 @@ export class AutoResumeProcessor {
         this.logger.log(`auto-resumed ${result.count} accounts`);
       }
     } finally {
-      await this.redis.client.del(this.LOCK);
+      this.running = false;
     }
   }
 }

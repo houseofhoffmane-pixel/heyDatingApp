@@ -1,5 +1,5 @@
 import { bootTestApp, closeTestApp, TestApp } from '../setup/test-app';
-import { cleanDb, disconnectTestPrisma, flushTestRedis, testPrisma } from '../setup/db';
+import { cleanDb, disconnectTestPrisma, resetInMemory, testPrisma } from '../setup/db';
 import { createUser } from '../helpers/profile.helper';
 import { connectWs, waitFor } from '../helpers/ws.helper';
 import { api } from '../helpers/api';
@@ -12,7 +12,7 @@ describe('Discovery / likes / matches (§8 #8-#12)', () => {
 
   beforeAll(async () => { t = await bootTestApp(); });
   afterAll(async () => { await closeTestApp(t); await disconnectTestPrisma(); });
-  beforeEach(async () => { await cleanDb(); await flushTestRedis(); });
+  beforeEach(async () => { await cleanDb(); resetInMemory(t.app); });
 
   // #8 — A likes B's photo with comment; B hasn't liked A → no match, like stored.
   it('records a like with anchor + comment when no reciprocal exists', async () => {

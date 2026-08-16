@@ -1,5 +1,5 @@
 import { bootTestApp, closeTestApp, TestApp } from '../setup/test-app';
-import { cleanDb, disconnectTestPrisma, flushTestRedis } from '../setup/db';
+import { cleanDb, disconnectTestPrisma, resetInMemory } from '../setup/db';
 import { createUser } from '../helpers/profile.helper';
 import { api } from '../helpers/api';
 
@@ -8,7 +8,7 @@ describe('Onboarding / Auth (§8 #1-#4)', () => {
 
   beforeAll(async () => { t = await bootTestApp(); });
   afterAll(async () => { await closeTestApp(t); await disconnectTestPrisma(); });
-  beforeEach(async () => { await cleanDb(); await flushTestRedis(); });
+  beforeEach(async () => { await cleanDb(); resetInMemory(t.app); });
 
   // #1
   it('rejects DOB making the user 17 with 422 UNDERAGE', async () => {

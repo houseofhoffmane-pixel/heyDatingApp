@@ -1,5 +1,5 @@
 import { bootTestApp, closeTestApp, TestApp } from '../setup/test-app';
-import { cleanDb, disconnectTestPrisma, flushTestRedis, testPrisma } from '../setup/db';
+import { cleanDb, disconnectTestPrisma, resetInMemory, testPrisma } from '../setup/db';
 import { createUser } from '../helpers/profile.helper';
 import { api } from '../helpers/api';
 
@@ -10,7 +10,7 @@ describe('Safety / account lifecycle (§8 #26-#29)', () => {
 
   beforeAll(async () => { t = await bootTestApp(); });
   afterAll(async () => { await closeTestApp(t); await disconnectTestPrisma(); });
-  beforeEach(async () => { await cleanDb(); await flushTestRedis(); });
+  beforeEach(async () => { await cleanDb(); resetInMemory(t.app); });
 
   // #26 — report with 4-char detail → 422 DETAIL_REQUIRED (the DTO catches it first).
   it('rejects a report whose detail is shorter than 10 chars', async () => {

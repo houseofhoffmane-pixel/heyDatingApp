@@ -1,5 +1,8 @@
 import { PrismaClient } from '@prisma/client';
-import IORedis from 'ioredis';
+import type { INestApplication } from '@nestjs/common';
+import { RateLimitService } from '../../src/common/ratelimit/ratelimit.service';
+import { PresenceService } from '../../src/modules/realtime/presence.service';
+import { FeedShownService } from '../../src/modules/discovery/feed-shown.service';
 
 /**
  * Mutable tables — these get TRUNCATED before each test so state from one
@@ -50,7 +53,7 @@ export async function cleanDb() {
   await prisma.$executeRawUnsafe(
     `TRUNCATE TABLE ${MUTABLE_TABLES.map((t) => `"${t}"`).join(', ')} RESTART IDENTITY CASCADE`,
   );
-  // Restore feed_config defaults — singleton row that's modified by Step 12 tests.
+  // Restore feed_config defaults — singleton row that's modified by ranking tests.
   await prisma.feedConfig.upsert({
     where: { id: 1 },
     create: { id: 1 },
@@ -61,12 +64,13 @@ export async function cleanDb() {
   });
 }
 
-/** Flush the Redis namespace used by .env.test so rate limits / presence reset. */
-export async function flushTestRedis() {
-  const redis = new IORedis(process.env.REDIS_URL!, { maxRetriesPerRequest: null });
-  try {
-    await redis.flushdb();
-  } finally {
-    redis.disconnect();
-  }
+/**
+ * Wipe every in-memory service that used to be Redis-backed (rate limits,
+ * presence, feed-shown). Sprint 2 replaced Redis with in-process Maps;
+ * this is the equivalent of `FLUSHDB` between specs.
+ */
+export function resetInMemory(app: INestApplication) {
+  app.get(RateLimitService).resetAll();
+  app.get(PresenceService).resetAll();
+  app.get(FeedShownService).resetAll();
 }
