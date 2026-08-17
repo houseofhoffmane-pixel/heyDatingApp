@@ -6,10 +6,8 @@ import { useAuthStore } from '../../stores/auth';
 
 interface Settings {
   notifyMatches: boolean; notifyMessages: boolean; notifyLikes: boolean;
-  notifyPlaces: boolean; notifyEvents: boolean;
   readReceipts: boolean; activeStatus: boolean;
-  showMeOnPlaces: boolean;
-  visibility: 'everyone' | 'liked_only' | 'spot_only';
+  visibility: 'everyone' | 'liked_only';
 }
 
 /**
@@ -70,22 +68,18 @@ export function Settings() {
 
       <Section label="who sees me">
         <ToggleRow label="everyone" sub="standard. most matches." on={s.visibility === 'everyone'} onClick={() => setVisibility('everyone')} />
-        <ToggleRow label="only people i've liked" sub="i swipe first." on={s.visibility === 'liked_only'} onClick={() => setVisibility('liked_only')} />
-        <ToggleRow label="only people at my spot" sub="hyper-local." on={s.visibility === 'spot_only'} onClick={() => setVisibility('spot_only')} last />
+        <ToggleRow label="only people i've liked" sub="i swipe first." on={s.visibility === 'liked_only'} onClick={() => setVisibility('liked_only')} last />
       </Section>
 
       <Section label="notifications">
         <Switch label="new matches" on={s.notifyMatches} onToggle={() => toggle('notifyMatches')} />
         <Switch label="new messages" on={s.notifyMessages} onToggle={() => toggle('notifyMessages')} />
-        <Switch label="new likes" on={s.notifyLikes} onToggle={() => toggle('notifyLikes')} />
-        <Switch label="people at my spot" on={s.notifyPlaces} onToggle={() => toggle('notifyPlaces')} />
-        <Switch label="event reminders" on={s.notifyEvents} onToggle={() => toggle('notifyEvents')} last />
+        <Switch label="new likes" on={s.notifyLikes} onToggle={() => toggle('notifyLikes')} last />
       </Section>
 
       <Section label="privacy">
         <Switch label="read receipts" on={s.readReceipts} onToggle={() => toggle('readReceipts')} />
-        <Switch label="active status" on={s.activeStatus} onToggle={() => toggle('activeStatus')} />
-        <Switch label="show me on Places" on={s.showMeOnPlaces} onToggle={() => toggle('showMeOnPlaces')} last />
+        <Switch label="active status" on={s.activeStatus} onToggle={() => toggle('activeStatus')} last />
       </Section>
 
       <div style={{ marginTop: 24, textAlign: 'center' }}>

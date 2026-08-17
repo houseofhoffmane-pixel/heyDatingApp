@@ -125,7 +125,7 @@ export function Discover() {
       {loading ? (
         <div style={{ padding: '80px 0', textAlign: 'center', color: 'var(--ink-3)' }}>loading feed…</div>
       ) : feed.length === 0 ? (
-        <EmptyState reason={reason} onOpenPlaces={() => nav('/places')} onEnableLocation={useMyLocation} />
+        <EmptyState reason={reason} onOpenSettings={() => nav('/settings')} onEnableLocation={useMyLocation} />
       ) : (
         <div style={{
           display: 'grid',
@@ -269,7 +269,7 @@ function FeedCard({
   );
 }
 
-function EmptyState({ reason, onOpenPlaces, onEnableLocation }: { reason: string | null; onOpenPlaces: () => void; onEnableLocation: () => void }) {
+function EmptyState({ reason, onOpenSettings, onEnableLocation }: { reason: string | null; onOpenSettings: () => void; onEnableLocation: () => void }) {
   if (reason === 'no_location') {
     return (
       <div style={{ padding: '80px 0', textAlign: 'center' }}>
@@ -292,9 +292,9 @@ function EmptyState({ reason, onOpenPlaces, onEnableLocation }: { reason: string
         </div>
         <h2 className="h-display h-3">nobody in your radius rn.</h2>
         <p style={{ marginTop: 8, color: 'var(--ink-2)', fontSize: 14.5, maxWidth: 340, margin: '8px auto 0' }}>
-          expand your filters or check into a Spot — events bring people in.
+          try widening your distance filter — new people show up all the time.
         </p>
-        <button className="btn coral lg" style={{ marginTop: 22 }} onClick={onOpenPlaces}>open Places →</button>
+        <button className="btn coral lg" style={{ marginTop: 22 }} onClick={onOpenSettings}>adjust filters →</button>
       </div>
     );
   }
@@ -305,9 +305,9 @@ function EmptyState({ reason, onOpenPlaces, onEnableLocation }: { reason: string
       </div>
       <h2 className="h-display h-3">you've seen everyone.</h2>
       <p style={{ marginTop: 8, color: 'var(--ink-2)', fontSize: 14.5, maxWidth: 340, margin: '8px auto 0' }}>
-        touch grass for an hour. or check out who's at a Spot right now.
+        touch grass for an hour — new people join every day. or try widening your filters.
       </p>
-      <button className="btn coral lg" style={{ marginTop: 22 }} onClick={onOpenPlaces}>open Places →</button>
+      <button className="btn coral lg" style={{ marginTop: 22 }} onClick={onOpenSettings}>adjust filters →</button>
     </div>
   );
 }

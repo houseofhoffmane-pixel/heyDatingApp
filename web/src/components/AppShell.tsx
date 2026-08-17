@@ -6,22 +6,22 @@ import { useAuthStore } from '../stores/auth';
 import { api } from '../api/client';
 import { useSocketEvent } from '../hooks/useSocket';
 
-type TabId = 'discover' | 'places' | 'events' | 'chats' | 'me';
+type TabId = 'discover' | 'chats' | 'me';
 
 const TABS: { id: TabId; label: string; icon: IconName; iconActive: IconName; path: string }[] = [
-  { id: 'discover', label: 'Discover', icon: 'flame',   iconActive: 'flame',    path: '/discover' },
-  { id: 'places',   label: 'Places',   icon: 'pin',     iconActive: 'pinFill',  path: '/places' },
-  { id: 'events',   label: 'Events',   icon: 'star',    iconActive: 'star',     path: '/events' },
-  { id: 'chats',    label: 'Chats',    icon: 'chat',    iconActive: 'chat',     path: '/chats' },
-  { id: 'me',       label: 'Me',       icon: 'user',    iconActive: 'userFill', path: '/me' },
+  { id: 'discover', label: 'Discover', icon: 'flame', iconActive: 'flame',    path: '/discover' },
+  { id: 'chats',    label: 'Chats',    icon: 'chat',  iconActive: 'chat',     path: '/chats' },
+  { id: 'me',       label: 'Me',       icon: 'user',  iconActive: 'userFill', path: '/me' },
 ];
 
 interface MePreview { name: string | null; mainPhotoUrl: string | null; }
 
 /**
- * App shell — side nav on ≥1024px (Discover / Places / Events / Chats / Me),
- * bottom tab bar on narrower viewports. All auth-required pages render
- * inside the shell via <Outlet />.
+ * App shell — side nav on ≥1024px (Discover / Chats / Me), bottom tab
+ * bar on narrower viewports. All auth-required pages render inside the
+ * shell via <Outlet />.
+ *
+ * Places + Events tabs were removed with those modules in Sprint 1.
  *
  * Redirects unauthenticated users to /splash and onboarding-status users
  * to /onboarding. Unread badge count comes from GET /notifications

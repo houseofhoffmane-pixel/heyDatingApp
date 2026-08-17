@@ -16,7 +16,7 @@ interface PhotoProps {
  * pastel painter driven off a stable seed. Never draws a face, and the
  * initial watermark is decorative only.
  *
- * Used everywhere: hero photos, carousels, profile cards, saved-spot
+ * Used everywhere: hero photos, carousels, profile cards, chat
  * strips. Consumers put it inside a positioned wrapper — the photo
  * fills 100% of its parent.
  */

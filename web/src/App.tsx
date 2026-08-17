@@ -14,10 +14,6 @@ import { OnboardingFlow } from './screens/onboarding/OnboardingFlow';
 // Main
 import { Discover } from './screens/main/Discover';
 import { ProfileDetail } from './screens/main/ProfileDetail';
-import { Places } from './screens/main/Places';
-import { PlaceDetail } from './screens/main/PlaceDetail';
-import { Events } from './screens/main/Events';
-import { EventDetail } from './screens/main/EventDetail';
 import { Chats } from './screens/main/Chats';
 import { Chat } from './screens/main/Chat';
 import { Me } from './screens/main/Me';
@@ -27,7 +23,9 @@ import { Settings } from './screens/main/Settings';
  * Top-level router. Three zones:
  *   - Public: /splash /phone /otp /login/email
  *   - Onboarding: /onboarding (its own multi-step shell)
- *   - Main (inside AppShell): /discover /places /events /chats /me + details
+ *   - Main (inside AppShell): /discover /chats /me + details
+ *
+ * Places + Events routes were removed with those modules in Sprint 1.
  *
  * Redirects:
  *   - No user + protected route → /splash
@@ -53,10 +51,6 @@ export function App() {
       <Route element={<AppShell />}>
         <Route path="/discover" element={<Discover />} />
         <Route path="/profile/:userId" element={<ProfileDetail />} />
-        <Route path="/places" element={<Places />} />
-        <Route path="/places/:id" element={<PlaceDetail />} />
-        <Route path="/events" element={<Events />} />
-        <Route path="/events/:id" element={<EventDetail />} />
         <Route path="/chats" element={<Chats />} />
         <Route path="/chats/:matchId" element={<Chat />} />
         <Route path="/me" element={<Me />} />

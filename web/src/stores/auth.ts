@@ -3,8 +3,8 @@ import { persist } from 'zustand/middleware';
 
 export interface AuthUser {
   id: string;
-  status: 'onboarding' | 'pending_verification' | 'active' | 'paused' | 'hidden' | 'banned' | 'deleted';
-  visibility: 'everyone' | 'liked_only' | 'spot_only';
+  status: 'onboarding' | 'active' | 'paused' | 'hidden' | 'banned' | 'deleted';
+  visibility: 'everyone' | 'liked_only';
   email: string | null;
   createdAt: string;
 }

@@ -16,7 +16,7 @@ interface Me {
 
 /**
  * Me — owner-side profile view. Big hero photo, edit + status buttons,
- * completion ring, saved-spots / favourite-events strips. Uses the
+ * completion ring, bio + interests + prompts. Uses the
  * ProfileShaper.toOwner shape from GET /me.
  */
 export function Me() {
