@@ -79,7 +79,10 @@ export function OnboardingFlow() {
     case 'prompts':      return <Prompts {...props} />;
     case 'bio':          return <Bio {...props} />;
     case 'photos':       return <Photos {...props} />;
-    case 'email-pass':   return <EmailPass {...props} />;
+    // 'email-pass' case removed with STEPS entry above — users set
+    // email + password at /signup now. The EmailPass component below
+    // is left defined so re-adding this case (when phone/OTP returns)
+    // is a two-line change.
   }
 }
 
