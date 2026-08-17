@@ -16,6 +16,7 @@ export function Otp() {
   const [phone] = useState(() => sessionStorage.getItem('otp-phone') ?? '');
   const [error, setError] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const setSession = useAuthStore((s) => s.setSession);
 
@@ -25,7 +26,7 @@ export function Otp() {
 
   const submit = async (code: string) => {
     setBusy(true);
-    setError(false); setErrorMsg(null);
+    setError(false); setErrorMsg(null); setErrorCode(null);
     try {
       const r = await api.postPublic<{ accessToken: string; refreshToken: string; user: AuthUser; isNewUser: boolean }>(
         '/auth/otp/verify', { phone_e164: phone, code },
@@ -36,7 +37,13 @@ export function Otp() {
     } catch (err) {
       setError(true);
       setOtp('');
-      if (err instanceof ApiError) setErrorMsg(err.message);
+      if (err instanceof ApiError) {
+        setErrorMsg(err.message);
+        setErrorCode(`${err.status} ${err.code}`);
+      } else {
+        setErrorMsg(err instanceof Error ? err.message : String(err));
+        setErrorCode('network');
+      }
     } finally {
       setBusy(false);
     }
@@ -53,12 +60,24 @@ export function Otp() {
   return (
     <AuthLayout back={() => nav('/phone')} step={2} total={5}>
       <div className="eyebrow">step 2 of 5</div>
-      <h1 className="h-display h-2" style={{ marginTop: 8 }}>{error ? 'wrong code.' : 'check your texts.'}</h1>
+      <h1 className="h-display h-2" style={{ marginTop: 8 }}>{
+        error
+          ? (errorCode?.includes('OTP_LOCKED') ? 'too many tries.' : 'sign-in failed.')
+          : 'check your texts.'
+      }</h1>
       <p style={{ color: 'var(--ink-2)', marginTop: 8, fontSize: 15, lineHeight: 1.4 }}>
         {error
           ? (errorMsg ?? "that one didn't match. try again.")
           : <>we sent a 6-digit code to <b style={{ color: 'var(--ink)' }}>{phone}</b>.</>}
       </p>
+      {error && errorCode && (
+        <p style={{
+          marginTop: 8, fontSize: 11, fontFamily: 'var(--mono, monospace)',
+          color: 'var(--ink-3)', opacity: 0.7,
+        }}>
+          [debug: {errorCode}]
+        </p>
+      )}
 
       <div style={{
         display: 'flex', gap: 8, marginTop: 28, justifyContent: 'center',
