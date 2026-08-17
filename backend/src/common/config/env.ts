@@ -1,13 +1,12 @@
 /**
  * Typed environment loader. Parses & validates process.env once, exposes
- * everything as `env`. Throws on boot if a required var is missing.
- *
- * Ship-scope after Sprint 2 — no admin, verification, geocoding, or
- * check-in vars, and no Redis. Single-process deploy on Hostinger.
+ * everything as `env`.
  *
  * DATABASE_URL can be provided directly OR assembled from DB_USER +
- * DB_PASS + DB_HOST + DB_PORT + DB_NAME (the assembly happens here at
- * the top of loadEnv so import ordering can't ever leave it stale).
+ * DB_PASS + DB_HOST + DB_PORT + DB_NAME. If neither works, the loader
+ * falls back to a placeholder URL so the app can still boot and
+ * /health can report the real problem — better than an opaque module-
+ * init crash before any of our diagnostic code runs.
  */
 
 import { z } from 'zod';
@@ -57,80 +56,90 @@ const schema = z.object({
   RL_LIKES_PER_DAY: z.coerce.number().int().default(200),
   RL_REPORTS_PER_DAY: z.coerce.number().int().default(10),
   RL_MESSAGES_PER_MIN: z.coerce.number().int().default(60),
+
+  JWT_ACCESS_SECRET_FALLBACK: z.string().optional(),
 });
 
 export type Env = z.infer<typeof schema>;
 
+/** Placeholder used when DATABASE_URL can't be resolved. Prisma will
+ * refuse to connect against this and log a clear error on the first
+ * query — much better UX than crashing at module-import time. */
+const PLACEHOLDER_URL = 'mysql://placeholder:placeholder@127.0.0.1:3306/placeholder';
+
 let cached: Env | null = null;
+
+// Write direct to stderr — synchronous, always flushed, always visible
+// in Hostinger's log even when the process is about to crash.
+const err = (line: string) => process.stderr.write(line + '\n');
 
 export function loadEnv(): Env {
   if (cached) return cached;
 
-  // Assemble DATABASE_URL from parts FIRST so the schema check below
-  // sees the resolved URL. Runs at whichever loadEnv() call comes
-  // first — no import-order trap.
   resolveDatabaseUrl();
+
+  // Fill placeholder JWT secrets so validation passes even in
+  // half-configured environments. We DO NOT run in production with
+  // these — the assertProductionSecrets check below refuses.
+  if (!process.env.JWT_ACCESS_SECRET) process.env.JWT_ACCESS_SECRET = 'placeholder-access-secret-not-for-production';
+  if (!process.env.JWT_REFRESH_SECRET) process.env.JWT_REFRESH_SECRET = 'placeholder-refresh-secret-not-for-production';
 
   const parsed = schema.safeParse(process.env);
   if (!parsed.success) {
-    const formatted = parsed.error.format();
-    // eslint-disable-next-line no-console
-    console.error('[env] Invalid environment:', JSON.stringify(formatted, null, 2));
-    // eslint-disable-next-line no-console
-    console.error(
-      '[env] For DATABASE_URL you can either provide the full URL, ' +
-      'or set DB_USER + DB_PASS + DB_HOST + DB_PORT + DB_NAME as separate ' +
-      'vars (we assemble it with proper URL encoding).',
-    );
-    throw new Error('Invalid environment configuration');
+    err('[env] Zod validation failed: ' + JSON.stringify(parsed.error.format()));
+    // Instead of throwing, coerce to defaults where we can. Anything
+    // still missing after this = a real config bug the user must fix,
+    // but the app boots so /health can tell them.
+    process.env.DATABASE_URL = process.env.DATABASE_URL || PLACEHOLDER_URL;
+    const retry = schema.safeParse(process.env);
+    if (!retry.success) {
+      err('[env] Fatal — cannot boot with this env. Missing/bad: ' + JSON.stringify(retry.error.format()));
+      throw new Error('Invalid environment — see stderr above');
+    }
+    cached = retry.data;
+  } else {
+    cached = parsed.data;
   }
-  if (parsed.data.NODE_ENV === 'production') {
-    assertProductionSecrets(parsed.data);
+
+  if (cached.NODE_ENV === 'production' && cached.DATABASE_URL === PLACEHOLDER_URL) {
+    err('[env] WARNING: DATABASE_URL is the placeholder. DB queries will fail. Set DATABASE_URL or DB_USER+DB_PASS+DB_HOST+DB_NAME in Hostinger.');
   }
-  cached = parsed.data;
+  if (cached.NODE_ENV === 'production') {
+    assertProductionSecrets(cached);
+  }
   return cached;
 }
 
 /**
- * Populate process.env.DATABASE_URL from DB_USER/DB_PASS/DB_HOST/DB_PORT/DB_NAME
- * if the URL wasn't provided directly. Idempotent, safe to call anywhere.
- * Handles URL-encoding of user/pass so weird characters in the password
- * don't break the connection string.
- *
- * Loudly logs every visible env var name that starts with DB_ so if
- * Hostinger's UI shows vars that Node can't see, the mismatch is
- * obvious in the log.
+ * Assembles DATABASE_URL from DB_* env vars. Loud stderr logs at every
+ * decision point so the reason it succeeds/fails is visible in
+ * Hostinger's log.
  */
 function resolveDatabaseUrl(): void {
-  const dbKeys = Object.keys(process.env).filter((k) => k.startsWith('DB_') || k === 'DATABASE_URL');
-  // eslint-disable-next-line no-console
-  console.log(`[env] visible DB-related env keys: ${JSON.stringify(dbKeys)}`);
+  const allDbKeys = Object.keys(process.env).filter((k) => k.startsWith('DB_') || k === 'DATABASE_URL');
+  err(`[env] visible DB-related env keys: ${JSON.stringify(allDbKeys)}`);
+  err(`[env] total process.env keys: ${Object.keys(process.env).length}`);
 
   if (process.env.DATABASE_URL) {
-    // eslint-disable-next-line no-console
-    console.log(`[env] DATABASE_URL already set, using it as-is`);
+    err('[env] DATABASE_URL already set — using it as-is');
     return;
   }
 
-  const user = process.env.DB_USER?.trim() ?? '';
-  const name = process.env.DB_NAME?.trim() ?? '';
-
-  if (!user || !name) {
-    // eslint-disable-next-line no-console
-    console.error(
-      `[env] Cannot assemble DATABASE_URL — DB_USER="${user}" (len ${user.length}), ` +
-      `DB_NAME="${name}" (len ${name.length}). Both must be non-empty.`,
-    );
-    return;
-  }
-
+  const user = (process.env.DB_USER ?? '').trim();
+  const name = (process.env.DB_NAME ?? '').trim();
   const pass = process.env.DB_PASS ?? '';
   const host = (process.env.DB_HOST ?? '').trim() || 'localhost';
   const port = (process.env.DB_PORT ?? '').trim() || '3306';
 
+  err(`[env] DB parts — user="${user}" (len ${user.length}) pass-len=${pass.length} host="${host}" port="${port}" name="${name}" (len ${name.length})`);
+
+  if (!user || !name) {
+    err('[env] Cannot assemble DATABASE_URL — DB_USER and DB_NAME must be non-empty. Falling back to placeholder.');
+    return;
+  }
+
   process.env.DATABASE_URL = `mysql://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@${host}:${port}/${name}`;
-  // eslint-disable-next-line no-console
-  console.log(`[env] Assembled DATABASE_URL from parts (user=${user} host=${host}:${port} db=${name} pass-length=${pass.length})`);
+  err(`[env] Assembled DATABASE_URL: mysql://${user}:***@${host}:${port}/${name}`);
 }
 
 /**
@@ -145,6 +154,7 @@ function assertProductionSecrets(e: Env): void {
     if (v.length < 32) bad.push(`${name} must be ≥32 chars in production (got ${v.length})`);
     if (/^dev[-_]/i.test(v)) bad.push(`${name} looks like a dev placeholder (starts with "dev-")`);
     if (/^test[-_]/i.test(v)) bad.push(`${name} looks like a test placeholder (starts with "test-")`);
+    if (/placeholder/i.test(v)) bad.push(`${name} is the placeholder value — set a real secret`);
     if (v === 'change-me' || v === 'changeme') bad.push(`${name} is still the placeholder value`);
   };
 
@@ -156,17 +166,11 @@ function assertProductionSecrets(e: Env): void {
   }
 
   if (e.OTP_STUB_CODE && e.TWILIO_PROVIDER === 'stub') {
-    // Not a hard fail — you might legitimately want stub OTP in prod
-    // for a soft launch — but warn loudly.
-    // eslint-disable-next-line no-console
-    console.warn(
-      '[env] WARNING: TWILIO_PROVIDER=stub in production. Anyone with a phone number can log in with OTP_STUB_CODE.',
-    );
+    err('[env] WARNING: TWILIO_PROVIDER=stub in production. Anyone with a phone number can log in with OTP_STUB_CODE.');
   }
 
   if (bad.length > 0) {
-    // eslint-disable-next-line no-console
-    console.error('[env] Refusing to boot in production with insecure config:\n' + bad.map((b) => '  - ' + b).join('\n'));
-    throw new Error('Insecure production environment — see log above');
+    err('[env] Refusing to boot in production with insecure config:\n' + bad.map((b) => '  - ' + b).join('\n'));
+    throw new Error('Insecure production environment — see stderr above');
   }
 }
