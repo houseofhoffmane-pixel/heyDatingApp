@@ -16,7 +16,21 @@
 // DB columns stay snake_case; TS models stay camelCase via @map/@@map.
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // "native" covers our local dev machines (macOS / your linux box).
+  // The rest cover every Linux/OpenSSL combo Hostinger's shared hosting
+  // might spin us up on — RHEL/CentOS derivatives and Debian/Ubuntu, on
+  // both OpenSSL 1.1 and 3.0. Ship-all avoids the "PANIC: timer has
+  // gone away" from a mismatched engine.
+  binaryTargets = [
+    "native",
+    "debian-openssl-3.0.x",
+    "debian-openssl-1.1.x",
+    "rhel-openssl-3.0.x",
+    "rhel-openssl-1.1.x",
+    "linux-musl",
+    "linux-musl-openssl-3.0.x"
+  ]
 }
 
 datasource db {
