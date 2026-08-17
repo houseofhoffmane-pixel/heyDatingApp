@@ -4,7 +4,7 @@
   "private": true,
   "description": "Hey — dating app. Single Node process serves API + WS + SPA. Builds web/, copies to backend/public/, runs Nest.",
   "scripts": {
-    "install:all":  "npm --prefix backend install && npm --prefix web install",
+    "install:all":  "npm --prefix backend install --include=dev && npm --prefix web install --include=dev",
     "postinstall":  "npm run install:all",
     "build:web":    "npm --prefix web run build && node scripts/copy-web-build.mjs",
     "build:backend":"npm --prefix backend run build",
