@@ -4,14 +4,19 @@ import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 
 /**
  * PrismaClient with the mariadb driver adapter (Node-native MySQL
- * driver, no Rust engine). Prisma's Rust Query Engine PANICs with
- * "timer has gone away" on Hostinger's shared hosting regardless of
- * engineType — a known tokio/libuv interop bug. Driver adapters route
- * queries through pure Node code so the Rust runtime never enters
- * the picture.
+ * driver, no Rust engine). Bypasses the Rust engine's "timer has gone
+ * away" panic on Hostinger.
  *
- * mariadb npm driver speaks MySQL wire protocol natively — works
- * against MySQL 8, MariaDB, and Hostinger's managed MySQL.
+ * IMPORTANT — connection settings tuned for shared MySQL hosting
+ * (Hostinger's `auth-db2146.hstgr.io`):
+ *
+ *   - connectTimeout: 30_000 — mariadb's default is 1s which is too
+ *     tight for cross-tier TLS/DNS setup on shared hosts. Requests
+ *     just hang in the pool if the connect fails silently.
+ *   - acquireTimeout: 20_000 — same reason.
+ *   - allowPublicKeyRetrieval: true — some managed MySQLs need this
+ *     for caching_sha2_password authentication.
+ *   - connectionLimit: 5 — modest pool for a free-tier plan.
  */
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleDestroy {
@@ -22,18 +27,33 @@ export class PrismaService extends PrismaClient implements OnModuleDestroy {
     if (!url) {
       throw new Error('DATABASE_URL not set — resolveDatabaseUrl() must run before PrismaService instantiates');
     }
-    // Parse the mysql:// URL and hand mariadb a proper connection object.
-    // Passing a URL string works in some adapter versions but the config
-    // object is the stable API across Prisma 6.x.
     const u = new URL(url);
+    const host = u.hostname;
+    const port = u.port ? Number(u.port) : 3306;
+    const user = decodeURIComponent(u.username);
+    const database = u.pathname.replace(/^\//, '');
+
+    // Log the resolved connection (never the password) so a failed
+    // connection has visible context.
+    process.stderr.write(
+      `[prisma] mariadb adapter → ${user}@${host}:${port}/${database}` +
+      ` (connectTimeout=30s, poolLimit=5)\n`,
+    );
+
     const adapter = new PrismaMariaDb({
-      host: u.hostname,
-      port: u.port ? Number(u.port) : 3306,
-      user: decodeURIComponent(u.username),
+      host,
+      port,
+      user,
       password: decodeURIComponent(u.password),
-      database: u.pathname.replace(/^\//, ''),
+      database,
       connectionLimit: 5,
-    });
+      connectTimeout: 30_000,
+      acquireTimeout: 20_000,
+      // Managed MySQL with caching_sha2_password sometimes rejects the
+      // first auth attempt without this — safe to enable.
+      allowPublicKeyRetrieval: true,
+    } as any);
+
     super({ adapter } as any);
   }
 
