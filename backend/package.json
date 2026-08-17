@@ -44,6 +44,7 @@
     "class-validator": "^0.14.1",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
+    "nestjs-pino": "^4.1.0",
     "libphonenumber-js": "^1.11.5",
     "nanoid": "^3.3.7",
     "passport": "^0.7.0",

@@ -5,6 +5,7 @@ import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 import { PrismaModule } from './prisma/prisma.module';
 import { GeoModule } from './common/geo/geo.module';
+import { LoggerModule } from './common/logger/logger.module';
 import { RateLimitModule } from './common/ratelimit/ratelimit.module';
 import { GlobalRateLimitMiddleware } from './common/ratelimit/global-rate-limit.middleware';
 import { ProfileModule } from './common/profile/profile.module';
@@ -33,6 +34,7 @@ import { HealthController } from './health.controller';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    LoggerModule,
     ScheduleModule.forRoot(),
     // Serve the built web frontend from backend/public. Path anchored to
     // __dirname so it works whether Hostinger launches Node from the repo
