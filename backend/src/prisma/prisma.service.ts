@@ -1,21 +1,25 @@
 import { Injectable, OnModuleDestroy, Logger } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { PrismaMariaDb } from '@prisma/adapter-mariadb';
+import mariadb from 'mariadb';
 
 /**
- * PrismaClient with the mariadb driver adapter (Node-native MySQL
- * driver, no Rust engine).
+ * PrismaClient wired to a mariadb pool we create ourselves.
  *
- * Runtime connection settings for Hostinger's cross-tier MySQL:
- *   - connectTimeout 30_000ms — mariadb defaults to 1s
- *   - acquireTimeout 20_000ms
- *   - ssl:true first, retry ssl:false — Hostinger's managed MySQL
- *     may or may not require TLS depending on the plan; try both
- *   - allowPublicKeyRetrieval:true — needed for caching_sha2_password
+ * Boot probe (see git log) proved that raw mariadb.createConnection()
+ * with `ssl: { rejectUnauthorized: false }` reaches Hostinger's
+ * MySQL fine in ~100ms. But when the same ssl option is passed via
+ * PrismaMariaDb's config, Prisma's pool never resolves and queries
+ * time out — the adapter's config parser drops it silently.
+ *
+ * Fix: build the mariadb Pool ourselves (with all the tuning that
+ * actually reaches Hostinger's DB), then hand the ready-made Pool to
+ * PrismaMariaDb. This bypasses the adapter's config coercion.
  */
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
+  private readonly pool: mariadb.Pool;
 
   constructor() {
     const url = process.env.DATABASE_URL;
@@ -23,73 +27,53 @@ export class PrismaService extends PrismaClient implements OnModuleDestroy {
       throw new Error('DATABASE_URL not set — resolveDatabaseUrl() must run before PrismaService instantiates');
     }
     const u = new URL(url);
-    const cfg = {
-      host: u.hostname,
-      port: u.port ? Number(u.port) : 3306,
-      user: decodeURIComponent(u.username),
-      password: decodeURIComponent(u.password),
-      database: u.pathname.replace(/^\//, ''),
+    const host = u.hostname;
+    const port = u.port ? Number(u.port) : 3306;
+    const user = decodeURIComponent(u.username);
+    const password = decodeURIComponent(u.password);
+    const database = u.pathname.replace(/^\//, '');
+
+    process.stderr.write(
+      `[prisma] building mariadb pool → ${user}@${host}:${port}/${database} ` +
+      `(connectTimeout=30s, ssl=true, poolLimit=5)\n`,
+    );
+
+    const pool = mariadb.createPool({
+      host, port, user, password, database,
       connectionLimit: 5,
       connectTimeout: 30_000,
       acquireTimeout: 20_000,
-      // Managed MySQL with caching_sha2_password sometimes rejects the
-      // first auth attempt without this.
+      // SSL required by Hostinger's managed MySQL for cross-tier
+      // connections; self-signed cert on their end so
+      // rejectUnauthorized:false accepts it.
+      ssl: { rejectUnauthorized: false } as any,
+      // Managed MySQL with caching_sha2_password sometimes rejects
+      // the first auth attempt without this.
       allowPublicKeyRetrieval: true,
-      // SSL required by many managed MySQL hosts (Hostinger,
-      // PlanetScale, etc.). rejectUnauthorized:false so self-signed
-      // certs on Hostinger's shared plans don't reject us.
-      ssl: { rejectUnauthorized: false },
-    };
+    });
+    this.pool = pool;
 
-    process.stderr.write(
-      `[prisma] mariadb adapter → ${cfg.user}@${cfg.host}:${cfg.port}/${cfg.database}` +
-      ` (connectTimeout=30s, ssl=true, poolLimit=5)\n`,
-    );
-
-    const adapter = new PrismaMariaDb(cfg as any);
-    super({ adapter } as any);
-
-    // Fire-and-forget boot probe: raw connect + SELECT 1, log the
-    // outcome to stderr so we see the actual driver error (not our
-    // 15s health-check wrapper).
-    this.probeConnection(cfg).catch(() => { /* logged inside */ });
-  }
-
-  private async probeConnection(cfg: any) {
-    try {
-      // Import mariadb lazily so the boot log runs even if the
-      // adapter itself imports fine.
-      const mariadb = await import('mariadb');
-      const t0 = Date.now();
-      const conn = await mariadb.default.createConnection({
-        host: cfg.host, port: cfg.port, user: cfg.user, password: cfg.password,
-        database: cfg.database, connectTimeout: 30_000,
-        ssl: cfg.ssl, allowPublicKeyRetrieval: true,
+    // Warm the pool + prove it works before Nest starts wiring
+    // controllers. Fire-and-forget — the app boots regardless.
+    pool.getConnection()
+      .then(async (c) => {
+        try {
+          const r = await c.query('SELECT 1 AS ok');
+          process.stderr.write(`[prisma] pool warm OK — ${JSON.stringify(r)}\n`);
+        } finally {
+          c.release();
+        }
+      })
+      .catch((e) => {
+        process.stderr.write(`[prisma] pool warm FAILED: ${e?.code ?? ''} ${e?.message ?? e}\n`);
       });
-      const rows = await conn.query('SELECT 1 AS ok');
-      await conn.end();
-      process.stderr.write(`[prisma] boot probe OK in ${Date.now() - t0}ms — ${JSON.stringify(rows)}\n`);
-    } catch (e: any) {
-      process.stderr.write(`[prisma] boot probe FAILED: ${e?.code ?? ''} ${e?.message ?? e}\n`);
-      // Retry without SSL in case the server rejects it.
-      try {
-        const mariadb = await import('mariadb');
-        const t0 = Date.now();
-        const conn = await mariadb.default.createConnection({
-          host: cfg.host, port: cfg.port, user: cfg.user, password: cfg.password,
-          database: cfg.database, connectTimeout: 30_000,
-          ssl: false, allowPublicKeyRetrieval: true,
-        });
-        await conn.query('SELECT 1');
-        await conn.end();
-        process.stderr.write(`[prisma] boot probe (no-SSL retry) OK in ${Date.now() - t0}ms — server accepts plaintext\n`);
-      } catch (e2: any) {
-        process.stderr.write(`[prisma] boot probe (no-SSL retry) FAILED: ${e2?.code ?? ''} ${e2?.message ?? e2}\n`);
-      }
-    }
+
+    const adapter = new PrismaMariaDb(pool as any);
+    super({ adapter } as any);
   }
 
   async onModuleDestroy() {
     await this.$disconnect();
+    try { await this.pool.end(); } catch { /* ignore */ }
   }
 }
