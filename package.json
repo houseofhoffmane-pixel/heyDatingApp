@@ -5,6 +5,7 @@
   "description": "Hey — dating app. Single Node process serves API + WS + SPA. Builds web/, copies to backend/public/, runs Nest.",
   "scripts": {
     "install:all":  "npm --prefix backend install && npm --prefix web install",
+    "postinstall":  "npm run install:all",
     "build:web":    "npm --prefix web run build && node scripts/copy-web-build.mjs",
     "build:backend":"npm --prefix backend run build",
     "build":        "npm run install:all && npm run build:web && npm run build:backend",
