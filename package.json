@@ -20,6 +20,6 @@
     "smoke":          "bash scripts/smoke.sh"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   }
 }
