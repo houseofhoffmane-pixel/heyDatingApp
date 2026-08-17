@@ -46,6 +46,20 @@ npm start                # single Node process serves API + WS + SPA at :3000
 This is the shape Hostinger runs. See [DEPLOY.md](DEPLOY.md) for the
 full walk-through.
 
+## Golden-path smoke test
+
+Once the backend is running (`npm run dev:backend` or `npm start`),
+verify end-to-end wiring in ~5 seconds:
+
+```bash
+npm run smoke
+```
+
+The [smoke script](scripts/smoke.sh) onboards two users, sets their
+locations, and drives them through the like → match → chat flow via
+`curl`. Exits non-zero on the first failed step and prints the offending
+response body. Requires `jq`.
+
 ## Ship scope
 
 Removed in Sprints 1–3, not part of the launch:

@@ -107,7 +107,7 @@ export class MeService {
       throw ApiError.forbidden('ACCOUNT_DISABLED', 'Account is not modifiable.');
     }
 
-    // 'active' is only allowed from paused/hidden (not from onboarding/pending_verification).
+    // 'active' is only allowed from paused/hidden (not from onboarding).
     if (dto.status === 'active' && user.status !== UserStatus.paused && user.status !== UserStatus.hidden) {
       throw ApiError.badRequest('INVALID_TRANSITION', 'You can only resume from paused or hidden.');
     }

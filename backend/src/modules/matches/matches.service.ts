@@ -97,9 +97,8 @@ export class MatchesService {
                 name: loaded.profile.name,
                 age: loaded.user.dob ? computeAge(loaded.user.dob) : null,
                 mainPhotoUrl,
-                isVerified: true, // matches only exist between verified users
               }
-            : { userId: otherUserId, name: 'user unavailable', age: null, mainPhotoUrl: null, isVerified: false },
+            : { userId: otherUserId, name: 'user unavailable', age: null, mainPhotoUrl: null },
           lastMessage: last
             ? {
                 id: last.id,
