@@ -96,20 +96,41 @@ export function loadEnv(): Env {
  * if the URL wasn't provided directly. Idempotent, safe to call anywhere.
  * Handles URL-encoding of user/pass so weird characters in the password
  * don't break the connection string.
+ *
+ * Loudly logs every visible env var name that starts with DB_ so if
+ * Hostinger's UI shows vars that Node can't see, the mismatch is
+ * obvious in the log.
  */
 function resolveDatabaseUrl(): void {
-  if (process.env.DATABASE_URL) return;
-  if (!process.env.DB_USER || !process.env.DB_NAME) return;
-
-  const user = encodeURIComponent(process.env.DB_USER);
-  const pass = encodeURIComponent(process.env.DB_PASS ?? '');
-  const host = process.env.DB_HOST || 'localhost';
-  const port = process.env.DB_PORT || '3306';
-  const name = process.env.DB_NAME;
-
-  process.env.DATABASE_URL = `mysql://${user}:${pass}@${host}:${port}/${name}`;
+  const dbKeys = Object.keys(process.env).filter((k) => k.startsWith('DB_') || k === 'DATABASE_URL');
   // eslint-disable-next-line no-console
-  console.log(`[env] Assembled DATABASE_URL from parts (user=${process.env.DB_USER} host=${host}:${port} db=${name})`);
+  console.log(`[env] visible DB-related env keys: ${JSON.stringify(dbKeys)}`);
+
+  if (process.env.DATABASE_URL) {
+    // eslint-disable-next-line no-console
+    console.log(`[env] DATABASE_URL already set, using it as-is`);
+    return;
+  }
+
+  const user = process.env.DB_USER?.trim() ?? '';
+  const name = process.env.DB_NAME?.trim() ?? '';
+
+  if (!user || !name) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[env] Cannot assemble DATABASE_URL — DB_USER="${user}" (len ${user.length}), ` +
+      `DB_NAME="${name}" (len ${name.length}). Both must be non-empty.`,
+    );
+    return;
+  }
+
+  const pass = process.env.DB_PASS ?? '';
+  const host = (process.env.DB_HOST ?? '').trim() || 'localhost';
+  const port = (process.env.DB_PORT ?? '').trim() || '3306';
+
+  process.env.DATABASE_URL = `mysql://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@${host}:${port}/${name}`;
+  // eslint-disable-next-line no-console
+  console.log(`[env] Assembled DATABASE_URL from parts (user=${user} host=${host}:${port} db=${name} pass-length=${pass.length})`);
 }
 
 /**
