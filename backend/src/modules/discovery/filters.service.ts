@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Filters, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ApiError } from '../../common/errors/api-error';
 import { PutFiltersDto } from './dto/filters.dto';
@@ -9,7 +9,37 @@ import { PutFiltersDto } from './dto/filters.dto';
  * the row, seeding `lookingFor` from the profile so the user's stated
  * preference becomes the initial filter — subsequent PUTs are
  * authoritative overrides.
+ *
+ * The array fields (lookingFor, relationship, drinks, ...) are stored as
+ * MySQL JSON columns; Prisma types them as `JsonValue`. This service
+ * returns a normalized view where each JSON array is a plain `string[]`
+ * so callers don't have to cast.
  */
+
+export interface Filters {
+  userId: string;
+  lookingFor: string[];
+  relationship: string[];
+  drinks: string[];
+  smokes: string[];
+  exercise: string[];
+  weed420: string[];
+  kids: string[];
+  politics: string[];
+  religion: string[];
+  monogamy: string[];
+  starSign: string[];
+  interests: string[];
+  ageMin: number;
+  ageMax: number;
+  heightMinCm: number;
+  heightMaxCm: number;
+  distanceMi: number;
+  showMeOnPlaces: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 @Injectable()
 export class FiltersService {
   constructor(private readonly prisma: PrismaService) {}
@@ -48,22 +78,81 @@ export class FiltersService {
     if (dto.interests !== undefined)    data.interests    = dto.interests;
     if (dto.showMeOnPlaces !== undefined) data.showMeOnPlaces = dto.showMeOnPlaces;
 
-    return this.prisma.filters.update({ where: { userId }, data });
+    const updated = await this.prisma.filters.update({ where: { userId }, data });
+    return normalize(updated);
   }
 
   /** Internal — called by DiscoveryService too. */
   async getOrCreate(userId: string): Promise<Filters> {
     const existing = await this.prisma.filters.findUnique({ where: { userId } });
-    if (existing) return existing;
+    if (existing) return normalize(existing);
 
     // Seed lookingFor from the profile (so the first feed uses the user's
-    // stated preference) and let the rest fall to schema defaults.
+    // stated preference) and let the rest fall to empty JSON arrays.
     const profile = await this.prisma.profile.findUnique({
       where: { userId },
       select: { lookingFor: true },
     });
-    return this.prisma.filters.create({
-      data: { userId, lookingFor: profile?.lookingFor ?? [] },
+    const created = await this.prisma.filters.create({
+      data: {
+        userId,
+        lookingFor:   asStringArray(profile?.lookingFor),
+        relationship: [],
+        drinks:       [],
+        smokes:       [],
+        exercise:     [],
+        weed420:      [],
+        kids:         [],
+        politics:     [],
+        religion:     [],
+        monogamy:     [],
+        starSign:     [],
+        interests:    [],
+      },
     });
+    return normalize(created);
   }
+}
+
+/** Every JSON column comes back typed as `Prisma.JsonValue`. Cast to string[]. */
+function asStringArray(v: unknown): string[] {
+  if (Array.isArray(v)) return v as string[];
+  return [];
+}
+
+function normalize(row: {
+  userId: string;
+  lookingFor: Prisma.JsonValue; relationship: Prisma.JsonValue;
+  drinks: Prisma.JsonValue; smokes: Prisma.JsonValue; exercise: Prisma.JsonValue;
+  weed420: Prisma.JsonValue; kids: Prisma.JsonValue; politics: Prisma.JsonValue;
+  religion: Prisma.JsonValue; monogamy: Prisma.JsonValue; starSign: Prisma.JsonValue;
+  interests: Prisma.JsonValue;
+  ageMin: number; ageMax: number;
+  heightMinCm: number; heightMaxCm: number;
+  distanceMi: number; showMeOnPlaces: boolean;
+  createdAt: Date; updatedAt: Date;
+}): Filters {
+  return {
+    userId:         row.userId,
+    lookingFor:     asStringArray(row.lookingFor),
+    relationship:   asStringArray(row.relationship),
+    drinks:         asStringArray(row.drinks),
+    smokes:         asStringArray(row.smokes),
+    exercise:       asStringArray(row.exercise),
+    weed420:        asStringArray(row.weed420),
+    kids:           asStringArray(row.kids),
+    politics:       asStringArray(row.politics),
+    religion:       asStringArray(row.religion),
+    monogamy:       asStringArray(row.monogamy),
+    starSign:       asStringArray(row.starSign),
+    interests:      asStringArray(row.interests),
+    ageMin:         row.ageMin,
+    ageMax:         row.ageMax,
+    heightMinCm:    row.heightMinCm,
+    heightMaxCm:    row.heightMaxCm,
+    distanceMi:     row.distanceMi,
+    showMeOnPlaces: row.showMeOnPlaces,
+    createdAt:      row.createdAt,
+    updatedAt:      row.updatedAt,
+  };
 }

@@ -2,9 +2,8 @@
  * Runs ONCE before the entire test suite.
  *
  * - Loads .env.test
- * - Applies any pending migrations to hey_test
- * - Re-runs the seed so catalogs (interests, prompts, cities, sample
- *   spots/events, admin user) exist
+ * - Applies any pending migrations to hey_test (MySQL as of Sprint 3)
+ * - Re-runs the seed so interests + prompts exist
  *
  * Per-test cleanup (truncate mutable tables) lives in setup/db.ts and is
  * invoked from each spec's beforeEach.

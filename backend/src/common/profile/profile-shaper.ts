@@ -195,7 +195,7 @@ export function computeCompleteness(user: User, profile: ProfileWithJoins | null
     dob: !!user.dob,
     ageConfirmed: user.ageConfirmed,
     gender: !!profile?.gender,
-    lookingFor: !!profile?.lookingFor && profile.lookingFor.length > 0,
+    lookingFor: Array.isArray(profile?.lookingFor) && (profile!.lookingFor as unknown[]).length > 0,
     relationshipIntent: !!profile?.relationshipIntent,
     heightCm: !!profile?.heightCm && profile.heightCm > 0,
     bio: !!profile?.bio?.trim() && profile.bio.trim().length >= 8,

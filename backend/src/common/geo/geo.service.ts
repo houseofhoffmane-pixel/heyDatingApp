@@ -2,14 +2,18 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 
 /**
- * GeoService — raw-SQL helpers for the profiles.location spatial column.
+ * GeoService — raw-SQL helpers for the profiles.location POINT column.
  *
- * Slim ship-scope: only `profiles.location` remains as a spatial column
- * (used by the discovery distance filter). Place/event geo helpers were
- * removed in Sprint 1 along with those modules.
+ * MySQL 8 replaces the Sprint 1/2 PostGIS setup:
+ *   - Column is `POINT` (SRID 0, unprojected) — Prisma doesn't model
+ *     spatial types, the column exists only in the init migration.
+ *   - Coordinates are written as `POINT(lng, lat)` (x=lng, y=lat).
+ *   - Distance is computed with `ST_Distance_Sphere(a, b)` which
+ *     returns meters using great-circle math and reads its arguments
+ *     as (longitude, latitude) regardless of SRID.
  *
- * The single source of truth for "1 mile" etc. is the caller — these
- * helpers take meters and return meters.
+ * "1 mile" etc. lives in the caller — these helpers take meters,
+ * return meters.
  */
 @Injectable()
 export class GeoService {
@@ -18,18 +22,18 @@ export class GeoService {
   /** Update the profile's last-known location. */
   async setProfileLocation(profileId: string, lat: number, lng: number): Promise<void> {
     await this.prisma.$executeRaw`
-      UPDATE "profiles"
-         SET "location" = ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography,
-             "updated_at" = NOW()
-       WHERE "id" = ${profileId}::uuid
+      UPDATE profiles
+         SET location   = POINT(${lng}, ${lat}),
+             updated_at = CURRENT_TIMESTAMP(6)
+       WHERE id = ${profileId}
     `;
   }
 
   /**
    * Find candidate profile IDs within `radiusMeters` of a coordinate.
-   * Currently unused directly — DiscoveryService does the query inline
-   * so it can combine distance with all its other filters in one shot.
-   * Kept here as the canonical spatial helper.
+   * DiscoveryService inlines the equivalent query so it can combine
+   * distance with all its other filters in one shot — this helper is
+   * the canonical spatial primitive.
    */
   async profilesWithin(
     lat: number,
@@ -39,20 +43,13 @@ export class GeoService {
   ): Promise<{ profileId: string; userId: string; distM: number }[]> {
     return this.prisma.$queryRaw<{ profileId: string; userId: string; distM: number }[]>`
       SELECT
-        "id"      AS "profileId",
-        "user_id" AS "userId",
-        ST_Distance(
-          "location",
-          ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography
-        )::float AS "distM"
-      FROM "profiles"
-      WHERE "location" IS NOT NULL
-        AND ST_DWithin(
-              "location",
-              ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography,
-              ${radiusMeters}
-            )
-      ORDER BY "distM" ASC
+        id      AS profileId,
+        user_id AS userId,
+        ST_Distance_Sphere(location, POINT(${lng}, ${lat})) AS distM
+      FROM profiles
+      WHERE location IS NOT NULL
+        AND ST_Distance_Sphere(location, POINT(${lng}, ${lat})) <= ${radiusMeters}
+      ORDER BY distM ASC
       LIMIT ${limit}
     `;
   }

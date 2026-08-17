@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { MatchStatus } from '@prisma/client';
+import { MatchStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ApiError } from '../../common/errors/api-error';
 import { ProfileShaper } from '../../common/profile/profile-shaper';
@@ -16,31 +16,47 @@ export class MatchesService {
   // ── GET /matches ─────────────────────────────────────────────
 
   async list(userId: string) {
-    // Active matches where I'm side A or B. Order: most-recent-message first,
-    // then newest match first for ones with no messages yet (these power the
-    // "new matches" strip in the UI — flagged via `isNew`).
-    const matches = await this.prisma.match.findMany({
-      where: {
-        status: MatchStatus.active,
-        OR: [{ userAId: userId }, { userBId: userId }],
-      },
-      orderBy: [
-        { lastMessageAt: { sort: 'desc', nulls: 'first' } },
-        { createdAt: 'desc' },
-      ],
-    });
+    // Active matches where I'm side A or B. Order: no-message matches
+    // first (newest first — these power the "new matches" strip in the
+    // UI, flagged via `isNew`), then matches that have exchanged messages
+    // (most-recent-message first).
+    //
+    // Split into two queries because Prisma's `nulls: 'first'` orderBy
+    // option is Postgres-only; MySQL would silently drop it.
+    const baseWhere = {
+      status: MatchStatus.active,
+      OR: [{ userAId: userId }, { userBId: userId }],
+    } as const;
+
+    const [newMatches, chattedMatches] = await Promise.all([
+      this.prisma.match.findMany({
+        where: { ...baseWhere, lastMessageAt: null },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.match.findMany({
+        where: { ...baseWhere, lastMessageAt: { not: null } },
+        orderBy: { lastMessageAt: 'desc' },
+      }),
+    ]);
+    const matches = [...newMatches, ...chattedMatches];
 
     if (matches.length === 0) return { data: [] };
 
     // Batch the "last message + unread" lookups with one query per side.
     const matchIds = matches.map((m) => m.id);
     const [lastMessages, unreadCounts] = await Promise.all([
+      // MySQL 8 has no DISTINCT ON — use ROW_NUMBER() to pick the newest
+      // message per match, then keep rn = 1.
       this.prisma.$queryRaw<{ match_id: string; id: string; body: string; kind: string; sender_id: string; created_at: Date }[]>`
-        SELECT DISTINCT ON (m.match_id)
-          m.match_id, m.id, m.body, m.kind::text AS kind, m.sender_id, m.created_at
-        FROM "messages" m
-        WHERE m.match_id = ANY(${matchIds}::uuid[])
-        ORDER BY m.match_id, m.created_at DESC
+        SELECT match_id, id, body, kind, sender_id, created_at
+        FROM (
+          SELECT
+            m.match_id, m.id, m.body, m.kind, m.sender_id, m.created_at,
+            ROW_NUMBER() OVER (PARTITION BY m.match_id ORDER BY m.created_at DESC) AS rn
+          FROM messages m
+          WHERE m.match_id IN (${Prisma.join(matchIds)})
+        ) t
+        WHERE t.rn = 1
       `,
       this.prisma.message.groupBy({
         by: ['matchId'],

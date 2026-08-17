@@ -1,9 +1,8 @@
 # Hey — backend
 
-Node.js + NestJS + Prisma. Currently Postgres + PostGIS; Sprint 3 swaps
-in MySQL 8 (JSON columns + `POINT SRID 4326`) so the app runs on
-Hostinger's managed MySQL and one Node process serves API + WebSockets +
-the built SPA.
+Node.js + NestJS + Prisma + MySQL 8. One Node process serves API +
+WebSockets + the built SPA against Hostinger's managed MySQL — no
+Redis, no separate worker.
 
 Originally scaffolded from `../BACKEND_SPEC.md`. Sprint 1 stripped the
 schema and modules down to the ship-scope feature set — face
@@ -11,11 +10,14 @@ verification, spots, events, admin console, and the BullMQ queue are
 gone; profile discovery, likes/matches, chat, and account safety remain.
 Sprint 2 removed Redis — presence, rate limits, the feed-shown cache,
 and cron locks all live in-process now (single-Node deploy).
+Sprint 3 swapped PostgreSQL/PostGIS for MySQL 8: JSON columns replace
+Postgres arrays, a MySQL `POINT` column + `ST_Distance_Sphere` replace
+PostGIS geography.
 
 ## Quick start
 
 ```bash
-# 1. infra (Postgres+PostGIS) in Docker
+# 1. infra (MySQL 8) in Docker
 docker compose up -d
 
 # 2. install
@@ -114,7 +116,7 @@ GET /discovery/profile/:userId
 
 Hard filters (SQL):
 1. `users.status = active`
-2. Distance ≤ `filters.distanceMi` (PostGIS `ST_DWithin`; Sprint 3 swaps to MySQL `ST_Distance_Sphere`)
+2. Distance ≤ `filters.distanceMi` (MySQL `ST_Distance_Sphere` on the profiles `POINT` column)
 3. Age ∈ `[ageMin, ageMax]`
 4. Height ∈ `[heightMinCm, heightMaxCm]` (NULL passes)
 5. Mutual gender ↔ lookingFor
@@ -186,9 +188,12 @@ Each spec truncates mutable tables between tests and reseeds the
 
 ## Deploying to Hostinger
 
-Sprint 3 rewrites the schema for MySQL 8 and moves the SPA under
-`../public`. The single-process deploy runs `node backend/dist/main.js`
-from the repo root — `@nestjs/serve-static` reads from `join(__dirname,
-'..', 'public')` so the static assets resolve regardless of Hostinger's
-working directory. Sprint 2 already removed Redis, so the deploy is one
-Node process + one managed database — no other infra needed.
+Single-process deploy: `node backend/dist/main.js` from the repo root.
+`@nestjs/serve-static` reads from `join(__dirname, '..', 'public')` so
+static assets resolve regardless of Hostinger's working directory.
+Redis was removed in Sprint 2 and Postgres in Sprint 3, so the deploy
+is one Node process + Hostinger's managed MySQL — no other infra needed.
+
+Set `DATABASE_URL="mysql://<user>:<pass>@<host>:3306/<db>"` from
+Hostinger's DB credentials and run `npx prisma migrate deploy && npm run
+db:seed` once against the fresh database.
