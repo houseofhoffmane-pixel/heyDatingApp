@@ -70,8 +70,49 @@ export function loadEnv(): Env {
     console.error('Invalid environment:', JSON.stringify(formatted, null, 2));
     throw new Error('Invalid environment configuration');
   }
+  if (parsed.data.NODE_ENV === 'production') {
+    assertProductionSecrets(parsed.data);
+  }
   cached = parsed.data;
   return cached;
+}
+
+/**
+ * Hard-fail on boot if production is running with dev defaults or weak
+ * secrets. Cheaper than discovering a signed-with-'dev-secret' JWT in
+ * the wild.
+ */
+function assertProductionSecrets(e: Env): void {
+  const bad: string[] = [];
+
+  const weak = (name: string, v: string) => {
+    if (v.length < 32) bad.push(`${name} must be ≥32 chars in production (got ${v.length})`);
+    if (/^dev[-_]/i.test(v)) bad.push(`${name} looks like a dev placeholder (starts with "dev-")`);
+    if (/^test[-_]/i.test(v)) bad.push(`${name} looks like a test placeholder (starts with "test-")`);
+    if (v === 'change-me' || v === 'changeme') bad.push(`${name} is still the placeholder value`);
+  };
+
+  weak('JWT_ACCESS_SECRET',  e.JWT_ACCESS_SECRET);
+  weak('JWT_REFRESH_SECRET', e.JWT_REFRESH_SECRET);
+
+  if (e.JWT_ACCESS_SECRET === e.JWT_REFRESH_SECRET) {
+    bad.push('JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different');
+  }
+
+  if (e.OTP_STUB_CODE && e.TWILIO_PROVIDER === 'stub') {
+    // Not a hard fail — you might legitimately want stub OTP in prod
+    // for a soft launch — but warn loudly.
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[env] WARNING: TWILIO_PROVIDER=stub in production. Anyone with a phone number can log in with OTP_STUB_CODE.',
+    );
+  }
+
+  if (bad.length > 0) {
+    // eslint-disable-next-line no-console
+    console.error('[env] Refusing to boot in production with insecure config:\n' + bad.map((b) => '  - ' + b).join('\n'));
+    throw new Error('Insecure production environment — see log above');
+  }
 }
 
 export const env = new Proxy({} as Env, {

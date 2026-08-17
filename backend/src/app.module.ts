@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ServeStaticModule } from '@nestjs/serve-static';
@@ -6,6 +6,7 @@ import { join } from 'path';
 import { PrismaModule } from './prisma/prisma.module';
 import { GeoModule } from './common/geo/geo.module';
 import { RateLimitModule } from './common/ratelimit/ratelimit.module';
+import { GlobalRateLimitMiddleware } from './common/ratelimit/global-rate-limit.middleware';
 import { ProfileModule } from './common/profile/profile.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { StorageModule } from './modules/storage/storage.module';
@@ -80,4 +81,11 @@ import { HealthController } from './health.controller';
   ],
   controllers: [HealthController],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    // Per-IP fallback rate limit. Applies to every route; per-endpoint
+    // limits in feature modules (OTP, likes, messages, reports) run on
+    // top and are stricter.
+    consumer.apply(GlobalRateLimitMiddleware).forRoutes('*');
+  }
+}
