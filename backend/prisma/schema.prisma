@@ -15,11 +15,20 @@
 //
 // DB columns stay snake_case; TS models stay camelCase via @map/@@map.
 
-// "native" covers local dev; the rest cover every Linux/OpenSSL combo
-// Hostinger might land us on (RHEL/Debian, OpenSSL 1.1 or 3.0). Ship-all
-// avoids the "PANIC: timer has gone away" from a mismatched engine.
+// engineType = "binary" runs the Query Engine as a separate child
+// process instead of loading it as a Node native library. The library
+// engine PANICs with "timer has gone away" on Hostinger's Node 18 +
+// Debian glibc combo (known Prisma 5.x issue on shared hosts with
+// restricted tokio/libuv interop). The binary engine keeps the Rust
+// runtime isolated from Node's event loop and avoids the crash.
+// Trade-off: slightly higher latency (IPC roundtrip); irrelevant at
+// our traffic level.
+//
+// binaryTargets — "native" for local dev, plus every Linux/OpenSSL
+// combo Hostinger might spin us up on.
 generator client {
   provider      = "prisma-client-js"
+  engineType    = "binary"
   binaryTargets = ["native", "debian-openssl-3.0.x", "debian-openssl-1.1.x", "rhel-openssl-3.0.x", "rhel-openssl-1.1.x", "linux-musl", "linux-musl-openssl-3.0.x"]
 }
 
