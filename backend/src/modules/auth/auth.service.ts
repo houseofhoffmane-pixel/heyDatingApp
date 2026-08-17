@@ -153,7 +153,7 @@ export class AuthService {
     } catch (e: any) {
       throw ApiError.internal(
         'DB_UNREACHABLE',
-        `Database unreachable during signup — likely misconfigured DB env or Remote MySQL not enabled. (${e?.message?.slice(0, 120) ?? 'unknown'})`,
+        `Database unreachable during signup — likely misconfigured DB env or Remote MySQL not enabled. (${e?.message?.slice(0, 500) ?? 'unknown'})`,
       );
     }
     if (existing) {
@@ -188,7 +188,7 @@ export class AuthService {
       }
       throw ApiError.internal(
         'DB_WRITE_FAILED',
-        `Could not create account — ${e?.message?.slice(0, 120) ?? 'unknown DB error'}`,
+        `Could not create account — ${e?.message?.slice(0, 500) ?? 'unknown DB error'}`,
       );
     }
 
