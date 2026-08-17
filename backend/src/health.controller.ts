@@ -4,19 +4,8 @@ import { PrismaService } from './prisma/prisma.service';
 import { Public } from './modules/auth/decorators/public.decorator';
 
 /**
- * Liveness/readiness probe. Uptime monitors and Hostinger's own
- * health checks read this.
- *
- * Actually queries the DB (`SELECT 1`) with a 2s timeout. The
- * lazy-connect PrismaService means a healthy `/health` also proves
- * we can reach the DB — bad `DATABASE_URL` shows up here first.
- *
- * Response:
- *   200 { ok: true,  db: true,  version, uptimeSec }   when healthy
- *   503 { ok: false, db: false, version, uptimeSec }   when DB is down
- *
- * Under 2s timeout regardless — never blocks past the timeout so the
- * proxy doesn't queue behind a stuck query.
+ * Liveness/readiness probe. Returns 200 healthy or 503 with the reason
+ * so we can see what's broken without SSH access.
  */
 @Controller()
 export class HealthController {
@@ -26,27 +15,44 @@ export class HealthController {
   @Get('health')
   @HttpCode(HttpStatus.OK)
   async health(@Res({ passthrough: true }) res: Response) {
-    const dbOk = await withTimeout(
-      this.prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false),
-      2000,
-      false,
-    );
+    let dbOk = false;
+    let dbError: string | null = null;
 
-    const body = {
+    try {
+      await withTimeout(
+        this.prisma.$queryRaw`SELECT 1`,
+        2000,
+        () => { throw new Error('DB query timed out after 2s'); },
+      );
+      dbOk = true;
+    } catch (e: any) {
+      dbError = String(e?.message ?? e).slice(0, 500);
+    }
+
+    const body: Record<string, unknown> = {
       ok: dbOk,
       db: dbOk,
       version: '0.1.0',
       uptimeSec: Math.round(process.uptime()),
     };
-
-    if (!dbOk) res.status(HttpStatus.SERVICE_UNAVAILABLE);
+    if (!dbOk) {
+      body.dbError = dbError;
+      // Also surface the DB parts we tried to connect with (no secrets)
+      // so a misconfigured DB_HOST / DB_NAME is obvious from /health alone.
+      const dbUrl = process.env.DATABASE_URL ?? '';
+      const hostPart = dbUrl.split('@')[1] ?? '(no URL)';
+      body.dbTarget = hostPart;
+      res.status(HttpStatus.SERVICE_UNAVAILABLE);
+    }
     return body;
   }
 }
 
-function withTimeout<T>(p: Promise<T>, ms: number, onTimeout: T): Promise<T> {
+function withTimeout<T>(p: Promise<T>, ms: number, onTimeout: () => T): Promise<T> {
   return Promise.race([
     p,
-    new Promise<T>((resolve) => setTimeout(() => resolve(onTimeout), ms)),
+    new Promise<T>((_, reject) => setTimeout(() => {
+      try { onTimeout(); } catch (e) { reject(e); }
+    }, ms)),
   ]);
 }
