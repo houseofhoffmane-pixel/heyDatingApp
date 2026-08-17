@@ -16,10 +16,11 @@ export function EmailSignup() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [errCode, setErrCode] = useState<string | null>(null);
   const valid = /^\S+@\S+\.\S+$/.test(email) && password.length >= 8;
 
   async function submit() {
-    setBusy(true); setErr(null);
+    setBusy(true); setErr(null); setErrCode(null);
     try {
       const r = await api.postPublic<{ accessToken: string; refreshToken: string; user: AuthUser; isNewUser: boolean }>(
         '/auth/signup/email', { email, password },
@@ -27,7 +28,13 @@ export function EmailSignup() {
       setSession({ accessToken: r.accessToken, refreshToken: r.refreshToken, user: r.user });
       nav('/onboarding', { replace: true });
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : 'Signup failed.');
+      if (e instanceof ApiError) {
+        setErr(e.message);
+        setErrCode(`${e.status} ${e.code}`);
+      } else {
+        setErr(e instanceof Error ? e.message : String(e));
+        setErrCode('network / non-JSON response — server probably crashed');
+      }
     } finally {
       setBusy(false);
     }
@@ -52,7 +59,19 @@ export function EmailSignup() {
           autoComplete="new-password" />
       </div>
 
-      {err && <div style={{ marginTop: 12, color: 'var(--coral)', fontSize: 13 }}>{err}</div>}
+      {err && (
+        <>
+          <div style={{ marginTop: 12, color: 'var(--coral)', fontSize: 13 }}>{err}</div>
+          {errCode && (
+            <div style={{
+              marginTop: 6, fontSize: 11, fontFamily: 'var(--mono, monospace)',
+              color: 'var(--ink-3)', opacity: 0.7,
+            }}>
+              [debug: {errCode}]
+            </div>
+          )}
+        </>
+      )}
 
       <div style={{ marginTop: 24 }}>
         <button className="btn coral full lg" disabled={!valid || busy} onClick={submit}>

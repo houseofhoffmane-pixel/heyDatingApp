@@ -145,7 +145,17 @@ export class AuthService {
       throw ApiError.badRequest('PASSWORD_WEAK', 'Password must be 8+ characters.', 'password');
     }
 
-    const existing = await this.prisma.user.findUnique({ where: { email: normalisedEmail } });
+    // Explicit try around each DB touch so a Prisma failure surfaces as
+    // a clean typed error instead of a bare 500 in the client.
+    let existing;
+    try {
+      existing = await this.prisma.user.findUnique({ where: { email: normalisedEmail } });
+    } catch (e: any) {
+      throw ApiError.internal(
+        'DB_UNREACHABLE',
+        `Database unreachable during signup — likely misconfigured DB env or Remote MySQL not enabled. (${e?.message?.slice(0, 120) ?? 'unknown'})`,
+      );
+    }
     if (existing) {
       throw ApiError.conflict('EMAIL_TAKEN', 'An account with that email already exists. Try logging in.');
     }
@@ -153,20 +163,34 @@ export class AuthService {
     const passwordHash = await argon2.hash(password);
     // Synthesised phone: unique per user, marked so we know it's a
     // placeholder. When phone auth ships, overwrite via a profile PATCH.
-    const placeholderPhone = `+00000000${Date.now()}`.slice(0, 16);
+    // Format: +999<epoch>  → always starts with '+999' which no real
+    // country uses, so we can grep for placeholders later.
+    const placeholderPhone = `+999${Date.now()}`;
 
-    const user = await this.prisma.user.create({
-      data: {
-        email: normalisedEmail,
-        passwordHash,
-        phoneE164: placeholderPhone,
-        countryCode: 'XX',
-        status: 'onboarding',
-        visibility: 'everyone',
-        ageConfirmed: false,
-        lastActiveAt: new Date(),
-      },
-    });
+    let user;
+    try {
+      user = await this.prisma.user.create({
+        data: {
+          email: normalisedEmail,
+          passwordHash,
+          phoneE164: placeholderPhone,
+          countryCode: 'XX',
+          status: 'onboarding',
+          visibility: 'everyone',
+          ageConfirmed: false,
+          lastActiveAt: new Date(),
+        },
+      });
+    } catch (e: any) {
+      // P2002 = unique constraint (email race, or placeholder phone collision).
+      if (e?.code === 'P2002') {
+        throw ApiError.conflict('EMAIL_TAKEN', 'Account with that email already exists.');
+      }
+      throw ApiError.internal(
+        'DB_WRITE_FAILED',
+        `Could not create account — ${e?.message?.slice(0, 120) ?? 'unknown DB error'}`,
+      );
+    }
 
     const issued = await this.tokens.issueForUser(user.id, ctx);
     return { ...issued, user: toUserPublic(user), isNewUser: true };
