@@ -11,7 +11,7 @@ export function Splash() {
 
   return (
     <div
-      onClick={() => nav('/phone')}
+      onClick={() => nav('/signup')}
       style={{
         minHeight: '100vh', width: '100%',
         display: 'flex', flexDirection: 'column',

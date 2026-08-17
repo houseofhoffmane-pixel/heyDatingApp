@@ -124,10 +124,58 @@ export class AuthService {
     };
   }
 
-  // ── Email + password login (backup) ───────────────────────────
+  // ── Email + password SIGN UP (phone-free path) ────────────────
+
+  /**
+   * Creates a fresh account from just email + password. Skips the
+   * phone/OTP flow entirely — used while SMS providers are stubbed.
+   * User lands in `onboarding` status; walks the 15-step flow to
+   * become `active`.
+   *
+   * Phone becomes a synthesised placeholder we can't collide on —
+   * the DB still requires phoneE164 as UNIQUE NOT NULL. When SMS
+   * ships later, an "add phone" onboarding step can overwrite it.
+   */
+  async signupEmail(email: string, password: string, ctx: { ip?: string; userAgent?: string }) {
+    const normalisedEmail = email.trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(normalisedEmail)) {
+      throw ApiError.badRequest('EMAIL_INVALID', 'That doesn\'t look like an email.', 'email');
+    }
+    if (password.length < 8) {
+      throw ApiError.badRequest('PASSWORD_WEAK', 'Password must be 8+ characters.', 'password');
+    }
+
+    const existing = await this.prisma.user.findUnique({ where: { email: normalisedEmail } });
+    if (existing) {
+      throw ApiError.conflict('EMAIL_TAKEN', 'An account with that email already exists. Try logging in.');
+    }
+
+    const passwordHash = await argon2.hash(password);
+    // Synthesised phone: unique per user, marked so we know it's a
+    // placeholder. When phone auth ships, overwrite via a profile PATCH.
+    const placeholderPhone = `+00000000${Date.now()}`.slice(0, 16);
+
+    const user = await this.prisma.user.create({
+      data: {
+        email: normalisedEmail,
+        passwordHash,
+        phoneE164: placeholderPhone,
+        countryCode: 'XX',
+        status: 'onboarding',
+        visibility: 'everyone',
+        ageConfirmed: false,
+        lastActiveAt: new Date(),
+      },
+    });
+
+    const issued = await this.tokens.issueForUser(user.id, ctx);
+    return { ...issued, user: toUserPublic(user), isNewUser: true };
+  }
+
+  // ── Email + password LOGIN (returning user) ───────────────────
 
   async loginEmail(email: string, password: string, ctx: { ip?: string; userAgent?: string }) {
-    const user = await this.prisma.user.findUnique({ where: { email } });
+    const user = await this.prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
     if (!user || !user.passwordHash) {
       throw ApiError.unauthorized('LOGIN_INVALID', 'Email or password is wrong.');
     }

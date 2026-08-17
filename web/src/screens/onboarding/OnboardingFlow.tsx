@@ -12,10 +12,13 @@ import { Icon } from '../../components/Icon';
  * users.status → active (no verification gate).
  */
 
+// `email-pass` step removed — users now set email + password up-front
+// via /signup, so onboarding has nothing to collect there. Restore it
+// to the end of this array when we bring the phone/OTP flow back.
 const STEPS = [
   'name-dob', 'gender', 'lookingfor', 'relationship', 'height', 'work',
   'pronouns', 'starsign', 'lifestyle', 'values', 'interests',
-  'prompts', 'bio', 'photos', 'email-pass',
+  'prompts', 'bio', 'photos',
 ] as const;
 type Step = (typeof STEPS)[number];
 

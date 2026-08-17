@@ -4,9 +4,13 @@ import { AppShell } from './components/AppShell';
 
 // Auth
 import { Splash } from './screens/auth/Splash';
-import { Phone } from './screens/auth/Phone';
-import { Otp } from './screens/auth/Otp';
+import { EmailSignup } from './screens/auth/EmailSignup';
 import { EmailLogin } from './screens/auth/EmailLogin';
+// Phone/OTP flow is commented out until SMS provider (Twilio/Firebase)
+// is wired up. Uncomment these two imports + the routes below when
+// bringing OTP back.
+// import { Phone } from './screens/auth/Phone';
+// import { Otp } from './screens/auth/Otp';
 
 // Onboarding
 import { OnboardingFlow } from './screens/onboarding/OnboardingFlow';
@@ -21,9 +25,14 @@ import { Settings } from './screens/main/Settings';
 
 /**
  * Top-level router. Three zones:
- *   - Public: /splash /phone /otp /login/email
+ *   - Public: /splash /signup /login/email
  *   - Onboarding: /onboarding (its own multi-step shell)
  *   - Main (inside AppShell): /discover /chats /me + details
+ *
+ * Auth is email + password only right now. Phone/OTP will come back
+ * when SMS provider is wired up — see the commented imports above.
+ * Any /phone or /otp URL redirects to /signup so old bookmarks still
+ * land somewhere useful.
  *
  * Places + Events routes were removed with those modules in Sprint 1.
  *
@@ -40,9 +49,11 @@ export function App() {
     <Routes>
       {/* Public */}
       <Route path="/splash" element={authed ? <Navigate to={onboarding ? '/onboarding' : '/discover'} replace /> : <Splash />} />
-      <Route path="/phone" element={authed ? <Navigate to={onboarding ? '/onboarding' : '/discover'} replace /> : <Phone />} />
-      <Route path="/otp" element={authed ? <Navigate to={onboarding ? '/onboarding' : '/discover'} replace /> : <Otp />} />
+      <Route path="/signup" element={authed ? <Navigate to={onboarding ? '/onboarding' : '/discover'} replace /> : <EmailSignup />} />
       <Route path="/login/email" element={authed ? <Navigate to={onboarding ? '/onboarding' : '/discover'} replace /> : <EmailLogin />} />
+      {/* Phone/OTP disabled until SMS is wired — old links go to signup. */}
+      <Route path="/phone" element={<Navigate to="/signup" replace />} />
+      <Route path="/otp" element={<Navigate to="/signup" replace />} />
 
       {/* Onboarding */}
       <Route path="/onboarding/*" element={authed ? <OnboardingFlow /> : <Navigate to="/splash" replace />} />

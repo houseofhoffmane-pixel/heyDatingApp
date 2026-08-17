@@ -41,6 +41,16 @@ export class AuthController {
   }
 
   @Public()
+  @Post('signup/email')
+  @HttpCode(HttpStatus.OK)
+  async signupEmail(@Body() body: EmailLoginDto, @Req() req: Request) {
+    return this.auth.signupEmail(body.email, body.password, {
+      ip: extractIp(req),
+      userAgent: req.headers['user-agent'],
+    });
+  }
+
+  @Public()
   @Post('login/email')
   @HttpCode(HttpStatus.OK)
   async loginEmail(@Body() body: EmailLoginDto, @Req() req: Request) {
