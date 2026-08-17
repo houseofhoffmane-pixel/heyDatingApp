@@ -26,9 +26,11 @@
 // binaryTargets still listed so `prisma generate` succeeds on local
 // dev; runtime uses the adapter, not the binary.
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["driverAdapters"]
-  binaryTargets   = ["native", "debian-openssl-3.0.x", "debian-openssl-1.1.x", "rhel-openssl-3.0.x", "rhel-openssl-1.1.x", "linux-musl", "linux-musl-openssl-3.0.x"]
+  provider      = "prisma-client-js"
+  // driverAdapters is stable in Prisma 6 (no preview flag needed).
+  // binaryTargets kept for local dev / migrate; runtime uses the
+  // adapter (see backend/src/prisma/prisma.service.ts).
+  binaryTargets = ["native", "debian-openssl-3.0.x", "debian-openssl-1.1.x", "rhel-openssl-3.0.x", "rhel-openssl-1.1.x", "linux-musl", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
