@@ -15,21 +15,20 @@
 //
 // DB columns stay snake_case; TS models stay camelCase via @map/@@map.
 
-// engineType = "binary" runs the Query Engine as a separate child
-// process instead of loading it as a Node native library. The library
-// engine PANICs with "timer has gone away" on Hostinger's Node 18 +
-// Debian glibc combo (known Prisma 5.x issue on shared hosts with
-// restricted tokio/libuv interop). The binary engine keeps the Rust
-// runtime isolated from Node's event loop and avoids the crash.
-// Trade-off: slightly higher latency (IPC roundtrip); irrelevant at
-// our traffic level.
+// driverAdapters preview lets us bypass Prisma's Rust Query Engine
+// entirely and use a pure-Node MySQL driver (mariadb, which speaks
+// MySQL wire protocol). Prisma's Rust engine PANICs with "timer has
+// gone away" on Hostinger's shared hosting regardless of engineType
+// (library or binary) — known tokio/libuv interop issue on their
+// specific Linux/glibc combo. The driver adapter route sidesteps
+// the entire Rust runtime.
 //
-// binaryTargets — "native" for local dev, plus every Linux/OpenSSL
-// combo Hostinger might spin us up on.
+// binaryTargets still listed so `prisma generate` succeeds on local
+// dev; runtime uses the adapter, not the binary.
 generator client {
-  provider      = "prisma-client-js"
-  engineType    = "binary"
-  binaryTargets = ["native", "debian-openssl-3.0.x", "debian-openssl-1.1.x", "rhel-openssl-3.0.x", "rhel-openssl-1.1.x", "linux-musl", "linux-musl-openssl-3.0.x"]
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+  binaryTargets   = ["native", "debian-openssl-3.0.x", "debian-openssl-1.1.x", "rhel-openssl-3.0.x", "rhel-openssl-1.1.x", "linux-musl", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
