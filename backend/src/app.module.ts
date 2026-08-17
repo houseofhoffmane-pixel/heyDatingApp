@@ -36,13 +36,27 @@ import { HealthController } from './health.controller';
     // Serve the built web frontend from backend/public. Path anchored to
     // __dirname so it works whether Hostinger launches Node from the repo
     // root or from backend/. From backend/dist/app.module.js → ../public.
-    // `exclude` keeps API + WS routes out of the SPA fallback.
+    //
+    // Two-layer serve:
+    //   - Assets (hashed filenames under /assets/*) hit express.static and
+    //     return the file. Vite emits content-hashed filenames, so a
+    //     1-year immutable cache is safe.
+    //   - Everything else (deep SPA routes like /discover, /chats/:id)
+    //     falls through to `renderPath`, which returns index.html so the
+    //     React router can hydrate.
+    // `exclude` keeps /api* and /rt* out of both layers.
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', 'public'),
       exclude: ['/api*', '/rt*'],
+      renderPath: /^(?!\/api|\/rt)(.*)/,
       serveStaticOptions: {
         fallthrough: true,
         index: 'index.html',
+        setHeaders: (res, filePath) => {
+          if (/[.-][0-9a-f]{8,}\.(?:js|css|woff2?|png|jpg|jpeg|svg|webp|avif|ico)$/i.test(filePath)) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          }
+        },
       },
     }),
     PrismaModule,
