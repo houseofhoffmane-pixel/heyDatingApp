@@ -1,4 +1,11 @@
 import 'reflect-metadata';
+// MUST run before any @prisma/client import — assembles DATABASE_URL
+// from DB_USER/DB_PASS/DB_HOST/DB_PORT/DB_NAME if the caller preferred
+// splitting the pieces up in the host UI instead of URL-encoding a
+// full connection string.
+import { resolveDatabaseUrl } from './common/config/db-url';
+resolveDatabaseUrl();
+
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe, Logger } from '@nestjs/common';
