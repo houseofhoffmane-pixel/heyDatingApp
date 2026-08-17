@@ -1,11 +1,4 @@
 import 'reflect-metadata';
-// MUST run before any @prisma/client import — assembles DATABASE_URL
-// from DB_USER/DB_PASS/DB_HOST/DB_PORT/DB_NAME if the caller preferred
-// splitting the pieces up in the host UI instead of URL-encoding a
-// full connection string.
-import { resolveDatabaseUrl } from './common/config/db-url';
-resolveDatabaseUrl();
-
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe, Logger } from '@nestjs/common';
@@ -16,61 +9,63 @@ import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/errors/global-exception.filter';
 import { loadEnv } from './common/config/env';
 
+// Every step is wrapped in a labeled try so a runtime crash logs which
+// stage broke — not just a bare "PANIC" or "Error" with no context.
 async function bootstrap() {
-  // Bootstrap-time logger — pino isn't wired yet, so use Nest's built-in
-  // for these earliest lines. Once the app is created we swap in pino
-  // and log everything else through it.
-  const bootLog = new Logger('Bootstrap');
-  bootLog.log(`node=${process.version} platform=${process.platform}-${process.arch}`);
-  bootLog.log(`PORT=${process.env.PORT ?? '(unset, will default)'} NODE_ENV=${process.env.NODE_ENV}`);
-  bootLog.log(`DATABASE_URL=${process.env.DATABASE_URL ? '(set, ' + process.env.DATABASE_URL.split('@')[1] + ')' : '(MISSING)'}`);
+  const log = new Logger('Bootstrap');
 
-  const env = loadEnv();
+  log.log(`node=${process.version} platform=${process.platform}-${process.arch}`);
+  log.log(`PORT=${process.env.PORT ?? '(unset)'} NODE_ENV=${process.env.NODE_ENV ?? '(unset)'}`);
+  log.log(`DATABASE_URL=${process.env.DATABASE_URL ? '(direct)' : '(not set — will assemble from DB_* if present)'}`);
+  log.log(`DB_USER=${process.env.DB_USER ?? '(unset)'} DB_HOST=${process.env.DB_HOST ?? '(unset)'} DB_NAME=${process.env.DB_NAME ?? '(unset)'}`);
 
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
-    // Buffer logs until we swap in pino below.
-    bufferLogs: true,
-  });
+  let env;
+  try {
+    env = loadEnv();
+    log.log(`[step 1/5] env loaded — final DATABASE_URL host: ${env.DATABASE_URL.split('@')[1] ?? '?'}`);
+  } catch (err) {
+    log.error(`[step 1/5] env FAILED: ${(err as Error).message}`);
+    throw err;
+  }
 
-  // Swap Nest's default logger for pino. Every log across the app
-  // (including framework internals) now goes through it — JSON in
-  // prod, pretty in dev, redacted of secrets, correlated with req.id.
-  app.useLogger(app.get(PinoLogger));
+  let app: NestExpressApplication;
+  try {
+    app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
+    log.log('[step 2/5] Nest app created');
+  } catch (err) {
+    log.error(`[step 2/5] Nest create FAILED: ${(err as Error).message}`);
+    throw err;
+  }
 
-  // Behind Hostinger's reverse proxy — trust the first hop so req.ip is
-  // the real client, not the proxy. Feeds the per-IP rate limiter and
-  // the auth-attempts log correctly.
-  app.set('trust proxy', 1);
+  try {
+    app.useLogger(app.get(PinoLogger));
+    app.set('trust proxy', 1);
+    app.use(helmet({
+      contentSecurityPolicy: false,
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+      crossOriginEmbedderPolicy: false,
+    }));
+    app.use(json({ limit: '100kb' }));
+    app.use(urlencoded({ extended: true, limit: '100kb' }));
+    app.setGlobalPrefix('api/v1');
+    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    app.useGlobalFilters(new GlobalExceptionFilter());
+    app.enableShutdownHooks();
+    log.log('[step 3/5] middleware + filters wired');
+  } catch (err) {
+    log.error(`[step 3/5] middleware wire FAILED: ${(err as Error).message}`);
+    throw err;
+  }
 
-  // Security headers. CSP disabled until we emit per-hash nonces for
-  // Vite's assets. Rest of helmet's defaults are safe (HSTS, X-CTO,
-  // Referrer-Policy, etc.). CORP relaxed to cross-origin so localhost
-  // dev proxy can load photo URLs from the API origin.
-  app.use(helmet({
-    contentSecurityPolicy: false,
-    crossOriginResourcePolicy: { policy: 'cross-origin' },
-    crossOriginEmbedderPolicy: false,
-  }));
+  try {
+    await app.listen(env.PORT, '0.0.0.0');
+    log.log(`[step 4/5] listening on 0.0.0.0:${env.PORT}`);
+  } catch (err) {
+    log.error(`[step 4/5] listen FAILED: ${(err as Error).message}`);
+    throw err;
+  }
 
-  // Explicit body-size caps. Photo uploads bypass this (raw bytes
-  // through the storage controller).
-  app.use(json({ limit: '100kb' }));
-  app.use(urlencoded({ extended: true, limit: '100kb' }));
-
-  app.setGlobalPrefix('api/v1');
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-
-  // Single funnel for every thrown error → { error: { code, message } }.
-  // 5xxs log the stack; response body is generic.
-  app.useGlobalFilters(new GlobalExceptionFilter());
-
-  // Let OnModuleDestroy run when Hostinger sends SIGTERM. Without this,
-  // Prisma stays open until the process is force-killed, orphaning the
-  // connection on the DB side.
-  app.enableShutdownHooks();
-
-  await app.listen(env.PORT, '0.0.0.0');
-  new Logger('Bootstrap').log(`Hey API listening on :${env.PORT}`);
+  log.log(`[step 5/5] Hey API ready — public base ${env.PUBLIC_BASE_URL ?? '(unset)'}`);
 }
 
 bootstrap().catch((err) => {

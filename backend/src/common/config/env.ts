@@ -1,11 +1,13 @@
 /**
  * Typed environment loader. Parses & validates process.env once, exposes
  * everything as `env`. Throws on boot if a required var is missing.
- * In development missing vars fall back to safe defaults (matching
- * docker-compose).
  *
  * Ship-scope after Sprint 2 — no admin, verification, geocoding, or
  * check-in vars, and no Redis. Single-process deploy on Hostinger.
+ *
+ * DATABASE_URL can be provided directly OR assembled from DB_USER +
+ * DB_PASS + DB_HOST + DB_PORT + DB_NAME (the assembly happens here at
+ * the top of loadEnv so import ordering can't ever leave it stale).
  */
 
 import { z } from 'zod';
@@ -63,11 +65,23 @@ let cached: Env | null = null;
 
 export function loadEnv(): Env {
   if (cached) return cached;
+
+  // Assemble DATABASE_URL from parts FIRST so the schema check below
+  // sees the resolved URL. Runs at whichever loadEnv() call comes
+  // first — no import-order trap.
+  resolveDatabaseUrl();
+
   const parsed = schema.safeParse(process.env);
   if (!parsed.success) {
     const formatted = parsed.error.format();
     // eslint-disable-next-line no-console
-    console.error('Invalid environment:', JSON.stringify(formatted, null, 2));
+    console.error('[env] Invalid environment:', JSON.stringify(formatted, null, 2));
+    // eslint-disable-next-line no-console
+    console.error(
+      '[env] For DATABASE_URL you can either provide the full URL, ' +
+      'or set DB_USER + DB_PASS + DB_HOST + DB_PORT + DB_NAME as separate ' +
+      'vars (we assemble it with proper URL encoding).',
+    );
     throw new Error('Invalid environment configuration');
   }
   if (parsed.data.NODE_ENV === 'production') {
@@ -75,6 +89,27 @@ export function loadEnv(): Env {
   }
   cached = parsed.data;
   return cached;
+}
+
+/**
+ * Populate process.env.DATABASE_URL from DB_USER/DB_PASS/DB_HOST/DB_PORT/DB_NAME
+ * if the URL wasn't provided directly. Idempotent, safe to call anywhere.
+ * Handles URL-encoding of user/pass so weird characters in the password
+ * don't break the connection string.
+ */
+function resolveDatabaseUrl(): void {
+  if (process.env.DATABASE_URL) return;
+  if (!process.env.DB_USER || !process.env.DB_NAME) return;
+
+  const user = encodeURIComponent(process.env.DB_USER);
+  const pass = encodeURIComponent(process.env.DB_PASS ?? '');
+  const host = process.env.DB_HOST || 'localhost';
+  const port = process.env.DB_PORT || '3306';
+  const name = process.env.DB_NAME;
+
+  process.env.DATABASE_URL = `mysql://${user}:${pass}@${host}:${port}/${name}`;
+  // eslint-disable-next-line no-console
+  console.log(`[env] Assembled DATABASE_URL from parts (user=${process.env.DB_USER} host=${host}:${port} db=${name})`);
 }
 
 /**
@@ -114,9 +149,3 @@ function assertProductionSecrets(e: Env): void {
     throw new Error('Insecure production environment — see log above');
   }
 }
-
-export const env = new Proxy({} as Env, {
-  get(_t, prop) {
-    return loadEnv()[prop as keyof Env];
-  },
-});
