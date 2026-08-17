@@ -43,7 +43,7 @@ export class ChatGateway {
         body: body.body,
         kind: body.kind ?? 'text',
       });
-      return { ok: true, ...result };
+      return { ...result, ok: true };
     } catch (err: any) {
       this.logger.warn(`message:send failed user=${userId} match=${body.matchId}: ${err?.message}`);
       return { ok: false, error: serializeError(err) };
@@ -58,7 +58,7 @@ export class ChatGateway {
     const userId = socket.data.userId as string;
     try {
       const result = await this.chat.markRead(userId, body.matchId, body.upToMessageId);
-      return { ok: true, ...result };
+      return { ...result, ok: true };
     } catch (err: any) {
       return { ok: false, error: serializeError(err) };
     }

@@ -23,10 +23,10 @@ export class MatchesService {
     //
     // Split into two queries because Prisma's `nulls: 'first'` orderBy
     // option is Postgres-only; MySQL would silently drop it.
-    const baseWhere = {
+    const baseWhere: Prisma.MatchWhereInput = {
       status: MatchStatus.active,
       OR: [{ userAId: userId }, { userBId: userId }],
-    } as const;
+    };
 
     const [newMatches, chattedMatches] = await Promise.all([
       this.prisma.match.findMany({

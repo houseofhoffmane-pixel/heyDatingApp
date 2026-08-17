@@ -62,7 +62,9 @@ export class OnboardingService {
     if (Object.keys(profileData).length > 0) {
       await this.prisma.profile.upsert({
         where: { userId },
-        create: { userId, ...profileData },
+        // lookingFor is a required JSON column (Sprint 3 MySQL swap);
+        // seed as empty array — patchProfile spreads real values on top.
+        create: { userId, lookingFor: [], ...profileData },
         update: profileData,
       });
     } else {
@@ -70,7 +72,7 @@ export class OnboardingService {
       // so subsequent state probes don't see "no profile".
       await this.prisma.profile.upsert({
         where: { userId },
-        create: { userId },
+        create: { userId, lookingFor: [] },
         update: {},
       });
     }
@@ -242,7 +244,7 @@ export class OnboardingService {
   private async ensureProfile(userId: string) {
     let profile = await this.prisma.profile.findUnique({ where: { userId } });
     if (!profile) {
-      profile = await this.prisma.profile.create({ data: { userId } });
+      profile = await this.prisma.profile.create({ data: { userId, lookingFor: [] } });
     }
     return profile;
   }

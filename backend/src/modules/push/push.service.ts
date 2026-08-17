@@ -27,7 +27,7 @@ export class PushService {
   async sendToUser(
     userId: string,
     payload: PushPayload,
-    opts: { prefKey?: 'notifyMessages' | 'notifyMatches' | 'notifyLikes' | 'notifyPlaces' | 'notifyEvents'; respectQuietHours?: boolean } = {},
+    opts: { prefKey?: 'notifyMessages' | 'notifyMatches' | 'notifyLikes' | 'notifyPlaces' | 'notifyEvents' | 'notifyNews'; respectQuietHours?: boolean } = {},
   ) {
     if (opts.prefKey || opts.respectQuietHours) {
       const settings = await this.prisma.userSettings.findUnique({ where: { userId } });
