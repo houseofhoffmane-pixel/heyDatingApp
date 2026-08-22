@@ -2,31 +2,18 @@ import { Injectable, OnModuleDestroy, Logger } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { PrismaNeon } from '@prisma/adapter-neon';
 import { neonConfig } from '@neondatabase/serverless';
+import ws from 'ws';
 
 /**
  * PrismaClient wired to Neon's serverless Postgres via WebSocket.
  *
- * Why not the standard `pg` driver? Hostinger's Node.js tier can't
- * reliably open raw TCP to any external database. Neon's serverless
- * driver goes over WebSocket on port 443, which Hostinger's app tier
- * CAN reach — same as any HTTPS request.
- *
- * WebSocket source:
- *   - Node 22+: globalThis.WebSocket exists natively — use it.
- *   - Older Node: fall back to the `ws` package.
- * Detected at module load; Neon uses whatever we set.
+ * Uses the `ws` package explicitly (not Node's native WebSocket).
+ * Node 22+ has a global WebSocket but Neon's serverless driver
+ * needs the ws-style subprotocol/upgrade handling — the native
+ * browser-compatible WebSocket hangs mid-handshake on Node 24 and
+ * the pool never resolves.
  */
-
-if (typeof globalThis.WebSocket === 'function') {
-  neonConfig.webSocketConstructor = globalThis.WebSocket;
-} else {
-  // Late require so the ws dependency is only touched when actually
-  // needed. Keeps Node 22+ boots quicker + avoids the ESM interop
-  // pitfalls that older `ws` versions had on Node 18.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const ws = require('ws');
-  neonConfig.webSocketConstructor = ws;
-}
+neonConfig.webSocketConstructor = ws;
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleDestroy {
@@ -37,21 +24,31 @@ export class PrismaService extends PrismaClient implements OnModuleDestroy {
     if (!url) {
       throw new Error('DATABASE_URL not set — resolveDatabaseUrl() must run before PrismaService instantiates');
     }
+    if (!/[?&]sslmode=/.test(url)) {
+      process.stderr.write(
+        `[prisma] WARNING: DATABASE_URL has no sslmode parameter — Neon requires ?sslmode=require. ` +
+        `Connection will likely fail.\n`,
+      );
+    }
 
-    // Prisma 6 @prisma/adapter-neon takes a Neon PoolConfig; the
-    // adapter owns pool lifecycle so we don't manage it manually.
     const adapter = new PrismaNeon({ connectionString: url });
     super({ adapter } as any);
 
     const hostPart = url.split('@')[1]?.split('?')[0] ?? '?';
-    const wsSrc = typeof globalThis.WebSocket === 'function' ? 'native WebSocket' : 'ws package';
-    process.stderr.write(`[prisma] Neon adapter → ${hostPart} (via ${wsSrc})\n`);
+    process.stderr.write(`[prisma] Neon adapter → ${hostPart} (via ws package)\n`);
 
-    // Warm probe: real query at boot proves end-to-end connectivity
-    // before Nest wires controllers.
-    this.$queryRaw`SELECT 1 AS ok`
-      .then((r) => process.stderr.write(`[prisma] warm probe OK — ${JSON.stringify(r)}\n`))
-      .catch((e: any) => process.stderr.write(`[prisma] warm probe FAILED: ${e?.message ?? e}\n`));
+    // Warm probe with a hard 15s timeout so we always get a resolution
+    // in the log — either success, driver error, or a clear
+    // "hung past 15s" that tells us the adapter never responded.
+    Promise.race([
+      this.$queryRaw`SELECT 1 AS ok`.then(
+        (r) => `OK — ${JSON.stringify(r)}`,
+        (e: any) => `FAILED: ${e?.message ?? e}`,
+      ),
+      new Promise<string>((resolve) =>
+        setTimeout(() => resolve('TIMED OUT after 15s — driver hung mid-query'), 15_000),
+      ),
+    ]).then((result) => process.stderr.write(`[prisma] warm probe ${result}\n`));
   }
 
   async onModuleDestroy() {
