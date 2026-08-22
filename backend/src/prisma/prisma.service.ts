@@ -1,77 +1,55 @@
 import { Injectable, OnModuleDestroy, Logger } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
-import { PrismaMariaDb } from '@prisma/adapter-mariadb';
-import * as mariadb from 'mariadb';
+import { PrismaNeon } from '@prisma/adapter-neon';
+import { Pool, neonConfig } from '@neondatabase/serverless';
+import ws from 'ws';
 
 /**
- * PrismaClient wired to a mariadb pool we create ourselves.
+ * PrismaClient wired to Neon's serverless Postgres via WebSocket.
  *
- * Boot probe (see git log) proved raw mariadb.createConnection() with
- * `ssl: { rejectUnauthorized: false }` reaches Hostinger's MySQL fine
- * in ~100ms. But when the same ssl option is passed via PrismaMariaDb's
- * config, Prisma's pool never resolves — the adapter's config parser
- * drops it silently.
+ * Why not the standard `pg` driver? Hostinger's Node.js tier can't
+ * reliably open raw TCP to any external database (proved with MySQL
+ * and Prisma's own Rust engine). Neon's serverless driver goes over
+ * WebSocket on port 443, which Hostinger's app tier CAN reach — same
+ * as any HTTPS request.
  *
- * Fix: build the mariadb.Pool ourselves with all the tuning that
- * demonstrably works, then hand the ready-made Pool to PrismaMariaDb.
+ * Node's global fetch has WebSocket support in v22+, but we set
+ * neonConfig.webSocketConstructor = ws to guarantee the driver works
+ * on any Node 20+ host.
  */
+
+// Configure the Neon driver's WebSocket constructor once at module
+// load — before any Pool is created.
+neonConfig.webSocketConstructor = ws;
+
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
-  // Assigned inside constructor via a helper below (has to happen
-  // AFTER super()).
-  private pool!: mariadb.Pool;
+  private pool!: Pool;
 
   constructor() {
     const url = process.env.DATABASE_URL;
     if (!url) {
       throw new Error('DATABASE_URL not set — resolveDatabaseUrl() must run before PrismaService instantiates');
     }
-    const pool = buildPool(url);
-    const adapter = new PrismaMariaDb(pool as any);
+    const pool = new Pool({ connectionString: url });
+    const adapter = new PrismaNeon(pool);
     super({ adapter } as any);
     this.pool = pool;
 
-    // Warm the pool + prove it works. Fire-and-forget.
-    pool.getConnection()
-      .then(async (c) => {
-        try {
-          const r = await c.query('SELECT 1 AS ok');
-          process.stderr.write(`[prisma] pool warm OK — ${JSON.stringify(r)}\n`);
-        } finally {
-          c.release();
-        }
-      })
-      .catch((e: any) => {
-        process.stderr.write(`[prisma] pool warm FAILED: ${e?.code ?? ''} ${e?.message ?? e}\n`);
-      });
+    // Log the target (never the password) so failures include context.
+    const hostPart = url.split('@')[1]?.split('?')[0] ?? '?';
+    process.stderr.write(`[prisma] Neon adapter → ${hostPart}\n`);
+
+    // Warm probe: a real query at boot proves end-to-end connectivity
+    // before Nest starts wiring controllers.
+    this.$queryRaw`SELECT 1 AS ok`
+      .then((r) => process.stderr.write(`[prisma] warm probe OK — ${JSON.stringify(r)}\n`))
+      .catch((e: any) => process.stderr.write(`[prisma] warm probe FAILED: ${e?.message ?? e}\n`));
   }
 
   async onModuleDestroy() {
     await this.$disconnect();
     try { await this.pool.end(); } catch { /* ignore */ }
   }
-}
-
-function buildPool(url: string): mariadb.Pool {
-  const u = new URL(url);
-  const host = u.hostname;
-  const port = u.port ? Number(u.port) : 3306;
-  const user = decodeURIComponent(u.username);
-  const password = decodeURIComponent(u.password);
-  const database = u.pathname.replace(/^\//, '');
-
-  process.stderr.write(
-    `[prisma] building mariadb pool → ${user}@${host}:${port}/${database} ` +
-    `(connectTimeout=30s, ssl=true, poolLimit=5)\n`,
-  );
-
-  return mariadb.createPool({
-    host, port, user, password, database,
-    connectionLimit: 5,
-    connectTimeout: 30_000,
-    acquireTimeout: 20_000,
-    ssl: { rejectUnauthorized: false } as any,
-    allowPublicKeyRetrieval: true,
-  });
 }

@@ -192,7 +192,7 @@ export class PhotosService {
 
   private async ensureProfile(userId: string) {
     let profile = await this.prisma.profile.findUnique({ where: { userId } });
-    if (!profile) profile = await this.prisma.profile.create({ data: { userId, lookingFor: [] } });
+    if (!profile) profile = await this.prisma.profile.create({ data: { userId } });
     return profile;
   }
 }

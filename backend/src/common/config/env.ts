@@ -65,7 +65,7 @@ export type Env = z.infer<typeof schema>;
 /** Placeholder used when DATABASE_URL can't be resolved. Prisma will
  * refuse to connect against this and log a clear error on the first
  * query — much better UX than crashing at module-import time. */
-const PLACEHOLDER_URL = 'mysql://placeholder:placeholder@127.0.0.1:3306/placeholder';
+const PLACEHOLDER_URL = 'postgres://placeholder:placeholder@127.0.0.1:5432/placeholder';
 
 let cached: Env | null = null;
 
@@ -129,7 +129,7 @@ function resolveDatabaseUrl(): void {
   const name = (process.env.DB_NAME ?? '').trim();
   const pass = process.env.DB_PASS ?? '';
   const host = (process.env.DB_HOST ?? '').trim() || 'localhost';
-  const port = (process.env.DB_PORT ?? '').trim() || '3306';
+  const port = (process.env.DB_PORT ?? '').trim() || '5432';
 
   err(`[env] DB parts — user="${user}" (len ${user.length}) pass-len=${pass.length} host="${host}" port="${port}" name="${name}" (len ${name.length})`);
 
@@ -138,8 +138,8 @@ function resolveDatabaseUrl(): void {
     return;
   }
 
-  process.env.DATABASE_URL = `mysql://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@${host}:${port}/${name}`;
-  err(`[env] Assembled DATABASE_URL: mysql://${user}:***@${host}:${port}/${name}`);
+  process.env.DATABASE_URL = `postgres://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@${host}:${port}/${name}`;
+  err(`[env] Assembled DATABASE_URL: postgres://${user}:***@${host}:${port}/${name}`);
 }
 
 /**

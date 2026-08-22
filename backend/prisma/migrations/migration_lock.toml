@@ -1,2 +1,2 @@
 # Created by Prisma. DO NOT EDIT.
-provider = "mysql"
+provider = "postgresql"

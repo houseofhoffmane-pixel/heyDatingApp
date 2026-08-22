@@ -23,10 +23,10 @@ export function resolveDatabaseUrl() {
   const user = encodeURIComponent(process.env.DB_USER);
   const pass = encodeURIComponent(process.env.DB_PASS ?? '');
   const host = process.env.DB_HOST || 'localhost';
-  const port = process.env.DB_PORT || '3306';
+  const port = process.env.DB_PORT || '5432';
   const name = process.env.DB_NAME;
 
-  process.env.DATABASE_URL = `mysql://${user}:${pass}@${host}:${port}/${name}`;
+  process.env.DATABASE_URL = `postgres://${user}:${pass}@${host}:${port}/${name}`;
   // eslint-disable-next-line no-console
   console.log(`[db-url] assembled from parts: ${process.env.DB_USER}@${host}:${port}/${name}`);
 }

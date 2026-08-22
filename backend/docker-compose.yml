@@ -1,31 +1,29 @@
-# Local dev infra for Hey backend (Sprint 3 — MySQL 8).
-# `docker compose up -d` and the API can talk to MySQL.
-# Production runs on Hostinger's managed MySQL — this compose is dev-only.
+# Local dev infra for Hey backend (Sprint 9 — Postgres + PostGIS).
+# `docker compose up -d` gives you a local Postgres for dev; production
+# runs on Neon (Postgres over WebSocket) so the app can reach the DB
+# from any host including Hostinger.
+# (Redis was removed in Sprint 2 — presence, rate limits, and the
+# feed-shown cache all live in-process now.)
 
 services:
-  mysql:
-    image: mysql:8.0
-    container_name: hey-mysql
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: hey-postgres
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: hey
-      MYSQL_USER: hey
-      MYSQL_PASSWORD: hey
-    command:
-      - --default-authentication-plugin=caching_sha2_password
-      - --character-set-server=utf8mb4
-      - --collation-server=utf8mb4_0900_ai_ci
+      POSTGRES_USER: hey
+      POSTGRES_PASSWORD: hey
+      POSTGRES_DB: hey
     ports:
-      - "3306:3306"
+      - "5432:5432"
     volumes:
-      - hey-mysqldata:/var/lib/mysql
+      - hey-pgdata:/var/lib/postgresql/data
       - ./prisma/init-shadow.sql:/docker-entrypoint-initdb.d/01-shadow.sql:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-hlocalhost", "-uroot", "-proot"]
-      interval: 5s
-      timeout: 5s
+      test: ["CMD-SHELL", "pg_isready -U hey -d hey"]
+      interval: 3s
+      timeout: 3s
       retries: 20
 
 volumes:
-  hey-mysqldata:
+  hey-pgdata:

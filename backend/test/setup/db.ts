@@ -50,17 +50,9 @@ export async function disconnectTestPrisma() {
 
 export async function cleanDb() {
   const prisma = testPrisma();
-  // MySQL 8 — disable FK checks around a bulk TRUNCATE. TRUNCATE resets
-  // AUTO_INCREMENT and is faster than DELETE for the volumes we see here.
-  // (The Postgres equivalent was `TRUNCATE … RESTART IDENTITY CASCADE`.)
-  await prisma.$executeRawUnsafe(`SET FOREIGN_KEY_CHECKS = 0`);
-  try {
-    for (const table of MUTABLE_TABLES) {
-      await prisma.$executeRawUnsafe(`TRUNCATE TABLE \`${table}\``);
-    }
-  } finally {
-    await prisma.$executeRawUnsafe(`SET FOREIGN_KEY_CHECKS = 1`);
-  }
+  await prisma.$executeRawUnsafe(
+    `TRUNCATE TABLE ${MUTABLE_TABLES.map((t) => `"${t}"`).join(', ')} RESTART IDENTITY CASCADE`,
+  );
   // Restore feed_config defaults — singleton row that's modified by ranking tests.
   await prisma.feedConfig.upsert({
     where: { id: 1 },

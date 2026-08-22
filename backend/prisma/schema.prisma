@@ -1,41 +1,29 @@
-// Hey — Prisma schema (ship-scope, MySQL 8).
+// Hey — Prisma schema (ship-scope, Postgres via Neon).
 //
-// Sprint 3 swap: PostgreSQL/PostGIS → MySQL 8 (Hostinger managed DB).
+// Sprint 9 swap: MySQL 8 → PostgreSQL (Neon serverless).
+// Hostinger's Node.js tier can't reliably reach raw-TCP MySQL from
+// their app tier — moving to Neon which exposes Postgres over
+// WebSocket (port 443, same as HTTPS) so the app can reach it from
+// any host including Hostinger.
 //
-// Type mapping:
-//   - PostGIS geography(Point, 4326) → MySQL POINT (SRID 0, unprojected).
-//     Distance is computed with ST_Distance_Sphere in meters — SRID 4326
-//     axis-order ambiguity avoids all of us a debugging afternoon.
-//     Prisma has no first-class POINT type, so the column is defined in
-//     the init migration and hidden from the client via `location Unsupported`.
-//   - Postgres text[] arrays → JSON columns. Prisma exposes these as
-//     `Prisma.JsonValue`; callers cast to `string[]` on read.
-//   - @db.Uuid → @db.Char(36). Prisma generates the UUID client-side.
-//   - @db.Timestamptz(6) → @db.Timestamp(6). MySQL stores UTC + fractional.
+// PostGIS enabled for the profiles.location column (distance filter).
+// Prisma has no first-class geography type; column is declared here
+// with Unsupported and populated via raw SQL in src/common/geo/.
 //
-// DB columns stay snake_case; TS models stay camelCase via @map/@@map.
+// All DB columns are snake_case; TS models stay camelCase via @map/@@map.
 
-// driverAdapters preview lets us bypass Prisma's Rust Query Engine
-// entirely and use a pure-Node MySQL driver (mariadb, which speaks
-// MySQL wire protocol). Prisma's Rust engine PANICs with "timer has
-// gone away" on Hostinger's shared hosting regardless of engineType
-// (library or binary) — known tokio/libuv interop issue on their
-// specific Linux/glibc combo. The driver adapter route sidesteps
-// the entire Rust runtime.
-//
-// binaryTargets still listed so `prisma generate` succeeds on local
-// dev; runtime uses the adapter, not the binary.
+// driverAdapters is stable in Prisma 6 — Neon adapter runs queries
+// through @neondatabase/serverless's WebSocket driver, no Rust
+// engine at runtime.
 generator client {
-  provider      = "prisma-client-js"
-  // driverAdapters is stable in Prisma 6 (no preview flag needed).
-  // binaryTargets kept for local dev / migrate; runtime uses the
-  // adapter (see backend/src/prisma/prisma.service.ts).
-  binaryTargets = ["native", "debian-openssl-3.0.x", "debian-openssl-1.1.x", "rhel-openssl-3.0.x", "rhel-openssl-1.1.x", "linux-musl", "linux-musl-openssl-3.0.x"]
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "mysql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis]
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -222,20 +210,20 @@ enum LinkedProvider {
 // ─────────────────────────────────────────────────────────────
 
 model User {
-  id              String      @id @default(uuid()) @db.Char(36)
-  phoneE164       String      @unique @map("phone_e164") @db.VarChar(32)
-  countryCode     String      @map("country_code") @db.VarChar(4)
-  email           String?     @unique @db.VarChar(255)
-  passwordHash    String?     @map("password_hash") @db.VarChar(255)
+  id              String      @id @default(uuid()) @db.Uuid
+  phoneE164       String      @unique @map("phone_e164")
+  countryCode     String      @map("country_code")
+  email           String?     @unique
+  passwordHash    String?     @map("password_hash")
   dob             DateTime?   @db.Date
   status          UserStatus  @default(onboarding)
   visibility      Visibility  @default(everyone)
-  autoResumeAt    DateTime?   @map("auto_resume_at") @db.Timestamp(6)
-  lastActiveAt    DateTime    @default(now()) @map("last_active_at") @db.Timestamp(6)
+  autoResumeAt    DateTime?   @map("auto_resume_at") @db.Timestamptz(6)
+  lastActiveAt    DateTime    @default(now()) @map("last_active_at") @db.Timestamptz(6)
   ageConfirmed    Boolean     @default(false) @map("age_confirmed")
-  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamp(6)
-  updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamp(6)
-  deletedAt       DateTime?   @map("deleted_at") @db.Timestamp(6)
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt       DateTime?   @map("deleted_at") @db.Timestamptz(6)
 
   profile             Profile?
   photos              Photo[]            @relation("PhotoOwner")
@@ -265,27 +253,25 @@ model User {
 // ─────────────────────────────────────────────────────────────
 // profiles
 //
-// `location` (POINT) is defined in the init migration — Prisma doesn't
-// model spatial types. GeoService reads/writes via raw SQL.
+// `location` column is created via the init migration as
+// geography(Point, 4326). Prisma reads/writes via raw SQL helpers
+// in src/common/geo/.
 // ─────────────────────────────────────────────────────────────
 
 model Profile {
-  id                  String              @id @default(uuid()) @db.Char(36)
-  userId              String              @unique @map("user_id") @db.Char(36)
-  // The 6 fields below are mandatory before status can advance to `active`.
-  // Nullable in the DB so a Profile row can exist during partial onboarding;
-  // OnboardingService validates presence + ranges before flipping status.
-  name                String?             @db.VarChar(80)
+  id                  String              @id @default(uuid()) @db.Uuid
+  userId              String              @unique @map("user_id") @db.Uuid
+  name                String?
   gender              Gender?
-  genderCustom        String?             @map("gender_custom") @db.VarChar(80)
-  // JSON string[] — values: women / men / non-binary / everyone
-  lookingFor          Json                @map("looking_for")
+  genderCustom        String?             @map("gender_custom")
+  // text[] — values: women / men / non-binary / everyone
+  lookingFor          String[]            @map("looking_for")
   relationshipIntent  RelationshipIntent? @map("relationship_intent")
   heightCm            Int?                @map("height_cm")
   bio                 String?             @db.VarChar(180)
-  job                 String?             @db.VarChar(120)
-  school              String?             @db.VarChar(120)
-  pronouns            String?             @db.VarChar(40)
+  job                 String?
+  school              String?
+  pronouns            String?
   starSign            StarSign?           @map("star_sign")
   drinks              Drinks?
   smokes              Smokes?
@@ -296,8 +282,8 @@ model Profile {
   religion            Religion?
   monogamy            Monogamy?
   completionPct       Int                 @default(0) @map("completion_pct")
-  createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamp(6)
-  updatedAt           DateTime            @updatedAt @map("updated_at") @db.Timestamp(6)
+  createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   interests   ProfileInterest[]
@@ -312,12 +298,12 @@ model Profile {
 // ─────────────────────────────────────────────────────────────
 
 model Interest {
-  id        String   @id @default(uuid()) @db.Char(36)
-  slug      String   @unique @db.VarChar(64)
-  label     String   @db.VarChar(80)
-  category  String   @db.VarChar(40)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+  id        String @id @default(uuid()) @db.Uuid
+  slug      String @unique
+  label     String
+  category  String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   profiles  ProfileInterest[]
 
@@ -325,9 +311,9 @@ model Interest {
 }
 
 model ProfileInterest {
-  profileId  String   @map("profile_id") @db.Char(36)
-  interestId String   @map("interest_id") @db.Char(36)
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  profileId  String @map("profile_id") @db.Uuid
+  interestId String @map("interest_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   profile  Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
   interest Interest @relation(fields: [interestId], references: [id], onDelete: Cascade)
@@ -341,11 +327,11 @@ model ProfileInterest {
 // ─────────────────────────────────────────────────────────────
 
 model Prompt {
-  id        String   @id @default(uuid()) @db.Char(36)
-  text      String   @db.VarChar(140)
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+  id        String  @id @default(uuid()) @db.Uuid
+  text      String
+  active    Boolean @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   answers   ProfilePrompt[]
 
@@ -353,13 +339,13 @@ model Prompt {
 }
 
 model ProfilePrompt {
-  id        String   @id @default(uuid()) @db.Char(36)
-  profileId String   @map("profile_id") @db.Char(36)
-  promptId  String   @map("prompt_id") @db.Char(36)
-  answer    String   @db.VarChar(280)
-  position  Int      @default(0)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+  id        String  @id @default(uuid()) @db.Uuid
+  profileId String  @map("profile_id") @db.Uuid
+  promptId  String  @map("prompt_id") @db.Uuid
+  answer    String  @db.VarChar(280)
+  position  Int     @default(0)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   profile     Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
   prompt      Prompt  @relation(fields: [promptId], references: [id], onDelete: Restrict)
@@ -375,16 +361,16 @@ model ProfilePrompt {
 // ─────────────────────────────────────────────────────────────
 
 model Photo {
-  id          String      @id @default(uuid()) @db.Char(36)
-  profileId   String      @map("profile_id") @db.Char(36)
-  userId      String      @map("user_id") @db.Char(36)
-  s3Key       String      @map("s3_key") @db.VarChar(255)
+  id          String      @id @default(uuid()) @db.Uuid
+  profileId   String      @map("profile_id") @db.Uuid
+  userId      String      @map("user_id") @db.Uuid
+  s3Key       String      @map("s3_key")
   position    Int
   isMain      Boolean     @default(false) @map("is_main")
   nsfwScore   Float?      @map("nsfw_score")
   status      PhotoStatus @default(pending)
-  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamp(6)
-  updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamp(6)
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   profile     Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
   user        User    @relation("PhotoOwner", fields: [userId], references: [id], onDelete: Cascade)
@@ -400,14 +386,14 @@ model Photo {
 // ─────────────────────────────────────────────────────────────
 
 model Like {
-  id              String         @id @default(uuid()) @db.Char(36)
-  fromUserId      String         @map("from_user_id") @db.Char(36)
-  toUserId        String         @map("to_user_id") @db.Char(36)
+  id              String         @id @default(uuid()) @db.Uuid
+  fromUserId      String         @map("from_user_id") @db.Uuid
+  toUserId        String         @map("to_user_id") @db.Uuid
   anchorType      LikeAnchorType @map("anchor_type")
-  anchorPhotoId   String?        @map("anchor_photo_id") @db.Char(36)
-  anchorPromptId  String?        @map("anchor_prompt_id") @db.Char(36)
+  anchorPhotoId   String?        @map("anchor_photo_id") @db.Uuid
+  anchorPromptId  String?        @map("anchor_prompt_id") @db.Uuid
   comment         String?        @db.VarChar(140)
-  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamp(6)
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
 
   fromUser     User           @relation("LikeFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
   toUser       User           @relation("LikeTo",   fields: [toUserId],   references: [id], onDelete: Cascade)
@@ -423,10 +409,10 @@ model Like {
 
 // passes — separate table (skip tracking, feed exclusion)
 model Pass {
-  id         String   @id @default(uuid()) @db.Char(36)
-  fromUserId String   @map("from_user_id") @db.Char(36)
-  toUserId   String   @map("to_user_id") @db.Char(36)
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  id         String   @id @default(uuid()) @db.Uuid
+  fromUserId String   @map("from_user_id") @db.Uuid
+  toUserId   String   @map("to_user_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@unique([fromUserId, toUserId])
   @@map("passes")
@@ -437,16 +423,16 @@ model Pass {
 // ─────────────────────────────────────────────────────────────
 
 model Match {
-  id            String      @id @default(uuid()) @db.Char(36)
-  userAId       String      @map("user_a_id") @db.Char(36)
-  userBId       String      @map("user_b_id") @db.Char(36)
-  likeAId       String      @unique @map("like_a_id") @db.Char(36)
-  likeBId       String      @unique @map("like_b_id") @db.Char(36)
+  id            String      @id @default(uuid()) @db.Uuid
+  userAId       String      @map("user_a_id") @db.Uuid
+  userBId       String      @map("user_b_id") @db.Uuid
+  likeAId       String      @unique @map("like_a_id") @db.Uuid
+  likeBId       String      @unique @map("like_b_id") @db.Uuid
   status        MatchStatus @default(active)
-  lastMessageAt DateTime?   @map("last_message_at") @db.Timestamp(6)
-  unmatchedBy   String?     @map("unmatched_by") @db.Char(36)
-  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamp(6)
-  updatedAt     DateTime    @updatedAt @map("updated_at") @db.Timestamp(6)
+  lastMessageAt DateTime?   @map("last_message_at") @db.Timestamptz(6)
+  unmatchedBy   String?     @map("unmatched_by") @db.Uuid
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   userA    User      @relation("MatchA", fields: [userAId], references: [id], onDelete: Cascade)
   userB    User      @relation("MatchB", fields: [userBId], references: [id], onDelete: Cascade)
@@ -465,15 +451,15 @@ model Match {
 // ─────────────────────────────────────────────────────────────
 
 model Message {
-  id        String        @id @default(uuid()) @db.Char(36)
-  matchId   String        @map("match_id") @db.Char(36)
-  senderId  String        @map("sender_id") @db.Char(36)
-  body      String        @db.Text
+  id        String        @id @default(uuid()) @db.Uuid
+  matchId   String        @map("match_id") @db.Uuid
+  senderId  String        @map("sender_id") @db.Uuid
+  body      String
   kind      MessageKind   @default(text)
   status    MessageStatus @default(sent)
-  clientId  String        @map("client_id") @db.VarChar(64)
-  readAt    DateTime?     @map("read_at") @db.Timestamp(6)
-  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamp(6)
+  clientId  String        @map("client_id")
+  readAt    DateTime?     @map("read_at") @db.Timestamptz(6)
+  createdAt DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
 
   match  Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
   sender User  @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
@@ -488,9 +474,9 @@ model Message {
 // ─────────────────────────────────────────────────────────────
 
 model Block {
-  blockerId String   @map("blocker_id") @db.Char(36)
-  blockedId String   @map("blocked_id") @db.Char(36)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  blockerId String   @map("blocker_id") @db.Uuid
+  blockedId String   @map("blocked_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   blocker User @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
   blocked User @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
@@ -501,17 +487,17 @@ model Block {
 }
 
 model Report {
-  id          String           @id @default(uuid()) @db.Char(36)
-  reporterId  String           @map("reporter_id") @db.Char(36)
+  id          String           @id @default(uuid()) @db.Uuid
+  reporterId  String           @map("reporter_id") @db.Uuid
   targetType  ReportTargetType @map("target_type")
-  targetId    String           @map("target_id") @db.Char(36)
+  targetId    String           @map("target_id") @db.Uuid
   reason      ReportReason
   detail      String           @db.VarChar(280)
   status      ReportStatus     @default(pending)
-  reviewedBy  String?          @map("reviewed_by") @db.Char(36)
-  reviewNote  String?          @map("review_note") @db.VarChar(500)
-  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamp(6)
-  updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamp(6)
+  reviewedBy  String?          @map("reviewed_by") @db.Uuid
+  reviewNote  String?          @map("review_note")
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   reporter    User    @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
 
@@ -526,14 +512,14 @@ model Report {
 // ─────────────────────────────────────────────────────────────
 
 model EmergencyContact {
-  id                 String   @id @default(uuid()) @db.Char(36)
-  userId             String   @unique @map("user_id") @db.Char(36)
-  name               String   @db.VarChar(80)
-  phoneE164          String   @map("phone_e164") @db.VarChar(32)
+  id                 String   @id @default(uuid()) @db.Uuid
+  userId             String   @unique @map("user_id") @db.Uuid
+  name               String
+  phoneE164          String   @map("phone_e164")
   autoShareFirstDate Boolean  @default(false) @map("auto_share_first_date")
   checkinTimer       Boolean  @default(false) @map("checkin_timer")
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamp(6)
-  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -545,12 +531,12 @@ model EmergencyContact {
 // ─────────────────────────────────────────────────────────────
 
 model Notification {
-  id        String   @id @default(uuid()) @db.Char(36)
-  userId    String   @map("user_id") @db.Char(36)
-  type      String   @db.VarChar(40)
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  type      String
   payload   Json
   read      Boolean  @default(false)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -559,13 +545,13 @@ model Notification {
 }
 
 model DeviceToken {
-  id        String         @id @default(uuid()) @db.Char(36)
-  userId    String         @map("user_id") @db.Char(36)
-  fcmToken  String         @map("fcm_token") @db.VarChar(255)
+  id        String         @id @default(uuid()) @db.Uuid
+  userId    String         @map("user_id") @db.Uuid
+  fcmToken  String         @map("fcm_token")
   platform  DevicePlatform
-  lastSeen  DateTime       @default(now()) @map("last_seen") @db.Timestamp(6)
-  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamp(6)
-  updatedAt DateTime       @updatedAt @map("updated_at") @db.Timestamp(6)
+  lastSeen  DateTime       @default(now()) @map("last_seen") @db.Timestamptz(6)
+  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -578,13 +564,13 @@ model DeviceToken {
 // ─────────────────────────────────────────────────────────────
 
 model LinkedAccount {
-  id          String         @id @default(uuid()) @db.Char(36)
-  userId      String         @map("user_id") @db.Char(36)
+  id          String         @id @default(uuid()) @db.Uuid
+  userId      String         @map("user_id") @db.Uuid
   provider    LinkedProvider
-  handle      String         @db.VarChar(120)
+  handle      String
   data        Json?
-  connectedAt DateTime       @default(now()) @map("connected_at") @db.Timestamp(6)
-  updatedAt   DateTime       @updatedAt @map("updated_at") @db.Timestamp(6)
+  connectedAt DateTime       @default(now()) @map("connected_at") @db.Timestamptz(6)
+  updatedAt   DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -597,13 +583,13 @@ model LinkedAccount {
 // ─────────────────────────────────────────────────────────────
 
 model UserSettings {
-  userId            String   @id @map("user_id") @db.Char(36)
+  userId            String   @id @map("user_id") @db.Uuid
 
   notifyMatches     Boolean  @default(true)  @map("notify_matches")
   notifyMessages    Boolean  @default(true)  @map("notify_messages")
   notifyLikes       Boolean  @default(true)  @map("notify_likes")
-  notifyPlaces      Boolean  @default(true)  @map("notify_places")   // vestigial toggle; harmless
-  notifyEvents      Boolean  @default(true)  @map("notify_events")   // vestigial toggle; harmless
+  notifyPlaces      Boolean  @default(true)  @map("notify_places")   // vestigial
+  notifyEvents      Boolean  @default(true)  @map("notify_events")   // vestigial
   notifyNews        Boolean  @default(false) @map("notify_news")
   emailDigest       Boolean  @default(false) @map("email_digest")
   quietHoursStart   Int?     @map("quiet_hours_start")
@@ -612,10 +598,10 @@ model UserSettings {
   readReceipts      Boolean  @default(true) @map("read_receipts")
   activeStatus      Boolean  @default(true) @map("active_status")
   blurExplicit      Boolean  @default(true) @map("blur_explicit")
-  showMeOnPlaces    Boolean  @default(true) @map("show_me_on_places") // vestigial; kept to avoid a needless drop
+  showMeOnPlaces    Boolean  @default(true) @map("show_me_on_places") // vestigial
 
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamp(6)
-  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -624,26 +610,23 @@ model UserSettings {
 
 // ─────────────────────────────────────────────────────────────
 // filters
-//
-// All array fields are JSON columns. Prisma exposes them as
-// `Prisma.JsonValue`; the service layer casts to `string[]` on read.
 // ─────────────────────────────────────────────────────────────
 
 model Filters {
-  userId          String   @id @map("user_id") @db.Char(36)
+  userId          String   @id @map("user_id") @db.Uuid
 
-  lookingFor      Json     @map("looking_for")
-  relationship    Json
-  drinks          Json
-  smokes          Json
-  exercise        Json
-  weed420         Json     @map("weed_420")
-  kids            Json
-  politics        Json
-  religion        Json
-  monogamy        Json
-  starSign        Json     @map("star_sign")
-  interests       Json
+  lookingFor      String[] @map("looking_for")
+  relationship    String[]
+  drinks          String[]
+  smokes          String[]
+  exercise        String[]
+  weed420         String[] @map("weed_420")
+  kids            String[]
+  politics        String[]
+  religion        String[]
+  monogamy        String[]
+  starSign        String[] @map("star_sign")
+  interests       String[]
 
   ageMin          Int      @default(18) @map("age_min")
   ageMax          Int      @default(99) @map("age_max")
@@ -652,8 +635,8 @@ model Filters {
   distanceMi      Int      @default(25) @map("distance_mi")
   showMeOnPlaces  Boolean  @default(true) @map("show_me_on_places") // vestigial
 
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamp(6)
-  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -665,16 +648,16 @@ model Filters {
 // ─────────────────────────────────────────────────────────────
 
 model RefreshToken {
-  id         String    @id @default(uuid()) @db.Char(36)
-  userId     String    @map("user_id") @db.Char(36)
-  tokenHash  String    @unique @map("token_hash") @db.VarChar(255)
-  family     String    @db.VarChar(64)
-  parentId   String?   @map("parent_id") @db.Char(36)
-  userAgent  String?   @map("user_agent") @db.VarChar(255)
-  ip         String?   @db.VarChar(64)
-  expiresAt  DateTime  @map("expires_at") @db.Timestamp(6)
-  revokedAt  DateTime? @map("revoked_at") @db.Timestamp(6)
-  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  tokenHash  String   @unique @map("token_hash")
+  family     String
+  parentId   String?  @map("parent_id") @db.Uuid
+  userAgent  String?  @map("user_agent")
+  ip         String?
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(6)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -688,12 +671,12 @@ model RefreshToken {
 // ─────────────────────────────────────────────────────────────
 
 model OtpAttempt {
-  id        String   @id @default(uuid()) @db.Char(36)
-  userId    String?  @map("user_id") @db.Char(36)
-  phoneE164 String   @map("phone_e164") @db.VarChar(32)
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  phoneE164 String   @map("phone_e164")
   success   Boolean  @default(false)
-  ip        String?  @db.VarChar(64)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  ip        String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -702,7 +685,7 @@ model OtpAttempt {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Feed-weight config (singleton, tunable — 5 terms now)
+// Feed-weight config (singleton, tunable — 5 terms)
 // ─────────────────────────────────────────────────────────────
 
 model FeedConfig {
@@ -712,7 +695,7 @@ model FeedConfig {
   wDistance                Float    @default(0.20) @map("w_distance")
   wReciprocal              Float    @default(0.20) @map("w_reciprocal")
   wRecentlyShownPenalty    Float    @default(0.05) @map("w_recently_shown_penalty")
-  updatedAt                DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+  updatedAt                DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("feed_config")
 }
