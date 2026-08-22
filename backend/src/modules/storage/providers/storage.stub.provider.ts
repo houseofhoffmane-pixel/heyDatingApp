@@ -27,8 +27,16 @@ export class StorageStubProvider implements StorageProvider {
   }
 
   private get publicBase() {
+    // Return '' → relative URLs like `/api/v1/_storage/read?...`.
+    // Same-origin: SPA and API are served by the same Node process, so
+    // the browser resolves the URL against whatever host it's on.
+    // Works on any deploy (Railway, custom domain, localhost dev)
+    // without needing PUBLIC_BASE_URL configured correctly. Only set
+    // an absolute host if PUBLIC_BASE_URL is explicitly configured —
+    // useful when photos need to be linked from an external context
+    // (email, push payload).
     const env = loadEnv();
-    return env.PUBLIC_BASE_URL || `http://localhost:${env.PORT}`;
+    return env.PUBLIC_BASE_URL ?? '';
   }
 
   private get signSecret() {
