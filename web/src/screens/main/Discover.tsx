@@ -6,6 +6,8 @@ import { Photo } from '../../components/Photo';
 import { PhotoCarousel } from '../../components/PhotoCarousel';
 import { LikeSheet, LikeAnchor } from './LikeSheet';
 import { MatchMoment } from './MatchMoment';
+import { FilterSheet } from './FilterSheet';
+import { markMatchShown } from './match-shown-store';
 
 interface Photo { id: string; url: string; position: number; isMain: boolean; }
 interface Prompt { id: string; position: number; prompt: { id: string; text: string }; answer: string; }
@@ -42,6 +44,7 @@ export function Discover() {
   const [likeTarget, setLikeTarget] = useState<{ profile: FeedProfile; anchor: LikeAnchor } | null>(null);
   const [match, setMatch] = useState<{ userId: string; name: string | null; mainPhotoUrl: string | null } | null>(null);
   const [needsLocation, setNeedsLocation] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,6 +84,9 @@ export function Discover() {
       // Remove them from the visible feed either way (liked or matched).
       setFeed((fs) => fs.filter((f) => f.userId !== profile.userId));
       if (res.matched) {
+        // Register the id so AppShell's WS handler skips its own popup
+        // for the same match (initiator would otherwise see two).
+        if (res.matchId) markMatchShown(res.matchId);
         setMatch({
           userId: profile.userId,
           name: profile.name,
@@ -106,7 +112,7 @@ export function Discover() {
           <div className="sub">{feed.length} nearby</div>
         </div>
         <div className="actions">
-          <button className="btn soft" onClick={() => nav('/settings')} style={{ padding: '8px 14px', fontSize: 13 }}>
+          <button className="btn soft" onClick={() => setFiltersOpen(true)} style={{ padding: '8px 14px', fontSize: 13 }}>
             <Icon name="filter" size={16} /> filters
           </button>
         </div>
@@ -173,6 +179,10 @@ export function Discover() {
           onChat={() => { nav('/chats'); setMatch(null); }}
           onClose={() => setMatch(null)}
         />
+      )}
+
+      {filtersOpen && (
+        <FilterSheet onClose={() => setFiltersOpen(false)} onApplied={load} />
       )}
     </div>
   );

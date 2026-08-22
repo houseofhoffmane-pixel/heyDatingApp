@@ -51,7 +51,19 @@ export function Chat() {
 
   useSocketEvent<Message>('message:new', (msg) => {
     if (msg.matchId !== matchId) return;
-    setMessages((ms) => ms.some((m) => m.id === msg.id) ? ms : [...ms, msg]);
+    setMessages((ms) => {
+      // Dedupe by either real id OR clientId — the sender's optimistic
+      // row is keyed by clientId until the ACK swaps it out; if the WS
+      // broadcast arrives first, this check prevents the duplicate.
+      // If we DO find an optimistic match, upgrade it to the real row.
+      const idx = ms.findIndex((m) => m.id === msg.id || m.clientId === msg.clientId);
+      if (idx >= 0) {
+        const next = ms.slice();
+        next[idx] = { ...msg, fromMe: me ? msg.senderId === me.id : msg.fromMe };
+        return next;
+      }
+      return [...ms, msg];
+    });
     if (me && msg.senderId !== me.id) {
       api.post(`/matches/${matchId}/read`, {}).catch(() => undefined);
     }

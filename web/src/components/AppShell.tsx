@@ -5,6 +5,13 @@ import { Avatar } from './Avatar';
 import { useAuthStore } from '../stores/auth';
 import { api } from '../api/client';
 import { useSocketEvent } from '../hooks/useSocket';
+import { MatchMoment } from '../screens/main/MatchMoment';
+import { markMatchShown, wasMatchShown } from '../screens/main/match-shown-store';
+
+interface MatchNewPayload {
+  match: { id: string };
+  otherProfile: { userId: string; name: string | null; mainPhotoUrl: string | null };
+}
 
 type TabId = 'discover' | 'chats' | 'me';
 
@@ -34,6 +41,7 @@ export function AppShell() {
   const [unread, setUnread] = useState(0);
   const [chatUnread, setChatUnread] = useState(0);
   const [me, setMe] = useState<MePreview>({ name: null, mainPhotoUrl: null });
+  const [pendingMatch, setPendingMatch] = useState<MatchNewPayload | null>(null);
 
   useEffect(() => {
     if (!user) { navigate('/splash', { replace: true }); return; }
@@ -62,7 +70,13 @@ export function AppShell() {
   useSocketEvent('message:new', (msg: { senderId: string }) => {
     if (user && msg.senderId !== user.id) setChatUnread((n) => n + 1);
   });
-  useSocketEvent('match:new', () => setUnread((n) => n + 1));
+  useSocketEvent<MatchNewPayload>('match:new', (payload) => {
+    setUnread((n) => n + 1);
+    if (!payload?.match?.id) return;
+    if (wasMatchShown(payload.match.id)) return; // Discover already showed it
+    markMatchShown(payload.match.id);
+    setPendingMatch(payload);
+  });
 
   if (!user || user.status === 'onboarding') return null;
 
@@ -112,6 +126,19 @@ export function AppShell() {
           );
         })}
       </nav>
+
+      {pendingMatch && (
+        <MatchMoment
+          otherProfile={pendingMatch.otherProfile}
+          blurred
+          onChat={() => {
+            const id = pendingMatch.match.id;
+            setPendingMatch(null);
+            navigate(`/chats/${id}`);
+          }}
+          onClose={() => setPendingMatch(null)}
+        />
+      )}
     </div>
   );
 }

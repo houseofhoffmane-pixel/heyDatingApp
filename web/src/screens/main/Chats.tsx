@@ -52,8 +52,17 @@ export function Chats() {
               <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 4 }}>
                 {newOnes.map((m) => (
                   <button key={m.id} onClick={() => nav(`/chats/${m.id}`)}
-                    style={{ flexShrink: 0, textAlign: 'center', width: 84, background: 'transparent', border: 0 }}>
-                    <Avatar src={m.otherProfile.mainPhotoUrl} name={m.otherProfile.name ?? 'x'} size={72} ring />
+                    style={{ flexShrink: 0, textAlign: 'center', width: 84, background: 'transparent', border: 0, position: 'relative' }}>
+                    {/* Subtle blur + coral dot until the user has opened this chat.
+                        Chat.tsx marks it read on mount; next refresh drops the isNew flag. */}
+                    <div style={{ filter: 'blur(2px)', transition: 'filter 300ms' }}>
+                      <Avatar src={m.otherProfile.mainPhotoUrl} name={m.otherProfile.name ?? 'x'} size={72} ring />
+                    </div>
+                    <span style={{
+                      position: 'absolute', top: -2, right: 6,
+                      width: 14, height: 14, borderRadius: 999,
+                      background: 'var(--coral)', border: '2px solid var(--bg)',
+                    }} />
                     <div style={{ marginTop: 6, fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {m.otherProfile.name}
                     </div>

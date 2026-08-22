@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { Photo } from '../../components/Photo';
 
@@ -6,6 +7,11 @@ interface Props {
   animation?: 'confetti' | 'hearts' | 'paper' | 'minimal';
   onChat: () => void;
   onClose: () => void;
+  /** Start with the other person's photo blurred until user taps "reveal".
+   * Used for the recipient side of a match — they didn't see the profile
+   * during the swipe (someone liked them from the discovery feed), so
+   * revealing is a small anticipation beat. */
+  blurred?: boolean;
 }
 
 /**
@@ -13,7 +19,8 @@ interface Props {
  * the prototype — Confetti, HeartsFloat, PaperFold — all keyframe based
  * (defined in globals.css).
  */
-export function MatchMoment({ otherProfile, animation = 'hearts', onChat, onClose }: Props) {
+export function MatchMoment({ otherProfile, animation = 'hearts', onChat, onClose, blurred = false }: Props) {
+  const [revealed, setRevealed] = useState(!blurred);
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 500,
@@ -53,8 +60,34 @@ export function MatchMoment({ otherProfile, animation = 'hearts', onChat, onClos
           <div className="pop-in" style={{ width: 150, height: 190, borderRadius: 24, overflow: 'hidden', transform: 'rotate(-7deg)' }}>
             <Photo name="you" />
           </div>
-          <div className="pop-in" style={{ width: 150, height: 190, borderRadius: 24, overflow: 'hidden', transform: 'rotate(7deg)', animationDelay: '100ms' }}>
-            <Photo src={otherProfile.mainPhotoUrl} name={otherProfile.name ?? 'match'} />
+          <div
+            className="pop-in"
+            onClick={() => !revealed && setRevealed(true)}
+            style={{
+              width: 150, height: 190, borderRadius: 24, overflow: 'hidden',
+              transform: 'rotate(7deg)', animationDelay: '100ms', position: 'relative',
+              cursor: revealed ? 'default' : 'pointer',
+            }}
+          >
+            <div style={{
+              width: '100%', height: '100%',
+              filter: revealed ? 'none' : 'blur(28px)',
+              transition: 'filter 400ms ease-out',
+              transform: revealed ? 'scale(1)' : 'scale(1.15)',
+            }}>
+              <Photo src={otherProfile.mainPhotoUrl} name={otherProfile.name ?? 'match'} />
+            </div>
+            {!revealed && (
+              <div style={{
+                position: 'absolute', inset: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'rgba(0,0,0,0.15)',
+                color: '#fff', fontSize: 13, fontWeight: 700,
+                textAlign: 'center', pointerEvents: 'none',
+              }}>
+                tap to reveal
+              </div>
+            )}
           </div>
         </div>
 
